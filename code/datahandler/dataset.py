@@ -15,6 +15,9 @@ class FuturesDataset(Dataset):
         # inner info 
         self.window_size = window_size
 
+        # outer info 
+        self.indices = None
+
     def __len__(self):
         return len(self.states)
 
@@ -42,6 +45,10 @@ class FuturesDataset(Dataset):
 
 
     def _split_dataset(self, df, window_size):
+
+        df = df.drop(['prevClose'], axis=1)
+        self.indices = df.columns.to_list()
+
         states = []
         close_prices = []
         timesteps = []
