@@ -2,10 +2,13 @@ import pandas as pd
 from torch.utils.data import Dataset
 from datetime import timedelta
 
-from indicator_ftns import *
+from datahandler.indicator_ftns import *
 
 class FuturesDataset(Dataset):
     def __init__(self, df, window_size):
+        # outer info 
+        self.indices = None
+        
         # df 
         grouped_df = self._make_group(df)
         total_df = self._add_technical_indicators(grouped_df)
@@ -15,8 +18,6 @@ class FuturesDataset(Dataset):
         # inner info 
         self.window_size = window_size
 
-        # outer info 
-        self.indices = None
 
     def __len__(self):
         return len(self.states)
