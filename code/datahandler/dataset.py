@@ -3,21 +3,27 @@ from torch.utils.data import Dataset
 from datetime import timedelta
 
 from datahandler.indicator_ftns import *
+from datahandler.scaler import *
 
 class FuturesDataset(Dataset):
-    def __init__(self, df, window_size):
+    def __init__(self, df, window_size, transform=None):
         # outer info 
         self.indices = None
         
+        # inner info 
+        self.window_size = window_size
+        self.transform_obj = transform
+
         # df 
         grouped_df = self._make_group(df)
         total_df = self._add_technical_indicators(grouped_df)
         cleaned_df = self._remove_Nan(total_df)
         self.states, self.close_prices, self.timesteps = self._split_dataset(cleaned_df, window_size)
 
-        # inner info 
-        self.window_size = window_size
-
+        # transform 
+        if self.transform_obj:
+            self._states = self.states 
+            self.states = self.transform_obj.fit_transform(self.states)
 
     def __len__(self):
         return len(self.states)
