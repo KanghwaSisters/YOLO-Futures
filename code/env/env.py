@@ -5,7 +5,7 @@ from env.reward_ftn import *
 from datahandler.dataset import *
 
 class FuturesEnvironment:
-    def __init__(self, full_df:pd.DataFrame, date_range:tuple, window_size:int, state_type, reward_ftn, done_ftn, max_strength, start_budget):
+    def __init__(self, full_df:pd.DataFrame, date_range:tuple, window_size:int, state_type, reward_ftn, done_ftn, start_budget, position_cap=None, scaler=None):
         ## inner infomation 
         self._full_df = full_df
         self._date_range = date_range
@@ -14,7 +14,8 @@ class FuturesEnvironment:
         self.df = self._slice_by_date(full_df, date_range)
 
         # dataset, data iterator 
-        self.dataset = FuturesDataset(self.df, window_size)
+        self.scaler = scaler
+        self.dataset = FuturesDataset(self.df, window_size, self.scaler)
         self.data_iterator = iter(self.dataset)
 
         # set state frame 
@@ -26,15 +27,17 @@ class FuturesEnvironment:
         self.current_position = 0     
         self.position_dict = {-1 : 'short', 0 : 'hold', 1 : 'long'}
         self.execution_strength = 0        # 체결 계약 수 
-        self.max_strength = max_strength   # 최대 계약 수 : 상한 
+        self.position_cap = position_cap   # 최대 계약 수 : 상한 
 
         # 시장 정보 
         self.previous_price = None
+        self.prev_unrealized_pnl = 0
         # self.maintenance_margin = 
         self.average_entry = 0
         self.contract_unit = 50000         # 거래 단위가 1포인트 당 5만원 (미니 선물)
 
         # current info 
+        self.init_budget = start_budget
         self.current_budget = start_budget
         self.unrealized_pnl = 0
         self.current_timestep = date_range[0]
@@ -126,18 +129,18 @@ class FuturesEnvironment:
 
         # 2. 현재 가격 업데이트
         current_price = close_price
-        self.previous_price = current_price
 
         # 3. 포지션 관련 업데이트
         prev_execution = self.current_position * self.execution_strength
         new_execution = prev_execution + action
 
-        realized_pnl = self._get_realized_pnl(current_price, prev_execution, action)
-        self._cal_ave_entry_price(current_price, prev_execution, new_execution, action)
+        realized_pnl = self._get_realized_pnl(self.previous_price, prev_execution, action)
+        self._cal_ave_entry_price(self.previous_price, prev_execution, new_execution, action)
 
         self.current_position, self.execution_strength = self._get_current_position_strength(action)
 
         # 4. PnL 및 Budget
+        self.prev_unrealized_pnl = self.unrealized_pnl
         self.unrealized_pnl = self._get_unrealized_pnl()
         self.current_budget += realized_pnl
 
@@ -146,11 +149,20 @@ class FuturesEnvironment:
                                 current_position=self.current_position, 
                                 execution_strength=self.execution_strength)
         
-        reward = self.get_reward(unrealized_pnl=self.unrealized_pnl)
-        done = self.get_done(current_timestep=self.current_timestep, next_timestep=next_timestep)
+        reward = self.get_reward(unrealized_pnl=self.unrealized_pnl, 
+                                 prev_unrealized_pnl=self.prev_unrealized_pnl,
+                                 current_budget=self.current_budget)
+        
+        done = self.get_done(current_timestep=self.current_timestep, next_timestep=next_timestep, 
+                             max_strength=self.position_cap, current_strength=self.execution_strength)
+        
+        # if self.position_cap is not None:
+        #     if self.execution_strength > self.position_cap:
+        #         done = True 
 
         # 6. Update
         self.next_state = next_state
+        self.previous_price = current_price
         self.current_timestep = next_timestep
 
         return next_state, reward, done
@@ -187,9 +199,10 @@ class FuturesEnvironment:
             f"⏱️  Current Timestep   : {self.current_timestep}\n"
             f"📈  Previous Close     : {self.previous_price:.2f}\n"
             f"💼  Current Position   : {self.position_dict[self.current_position]} ({self.current_position})\n"
-            f"📊  Execution Strength : {self.execution_strength}/{self.max_strength}\n"
+            f"📊  Execution Strength : {self.execution_strength}/{self.position_cap}\n"
             f"📉  Unrealized PnL     : {self.unrealized_pnl:.2f} KRW\n"
             f"💰  Current Budget     : {self.current_budget:.2f} KRW\n"
+            f"💵  Rate of Return     : {self.current_budget / self.init_budget * 100:.2f} %\n"
             f"⚖️  Avg Entry Price    : {self.average_entry:.2f}\n"
             f"==================================\n"
         )
