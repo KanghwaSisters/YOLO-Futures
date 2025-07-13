@@ -139,8 +139,8 @@ class PPOAgent:
 
         # get values - next_values : GAE 계산을 위함 
         with torch.no_grad():
-            _, values = self.model(states)
-            _, next_values = self.model(next_states)
+            _, values = self.model(*states)
+            _, next_values = self.model(*next_states)
 
         values = values.squeeze()
         next_values = next_values.squeeze()
@@ -194,14 +194,14 @@ class PPOAgent:
 
         # get current values 
         self.model.train()
-        current_policy, values = self.model((ts_states, ag_states))
+        current_policy, values = self.model(ts_states, ag_states)
         action_dist = Categorical(current_policy)                                # entropy bonus 
         current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
         current_probs = current_log_probs.exp()
 
         # 3 elements of loss : value_loss, clip_loss, entropy bonus 
         with torch.no_grad():
-            _, next_values = self.model(next_states)
+            _, next_values = self.model(*next_states)
             value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
         value_loss = F.mse_loss(values.squeeze(), value_target.detach())
