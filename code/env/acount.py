@@ -14,7 +14,7 @@ class Account:
         self.name_value = 0                     # 보유 계약의 명목 가치
         self.maintenance_margin = 0
 
-        self.current_position = 0     
+        self.current_position = 0
         self.position_dict = {-1 : 'short', 0 : 'hold', 1 : 'long'}
         self.execution_strength = 0             # 체결 계약 수
 
