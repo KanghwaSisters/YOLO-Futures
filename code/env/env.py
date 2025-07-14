@@ -46,7 +46,6 @@ class FuturesEnvironment:
         self.hold_over_penalty = -0.05
         self.margin_call_penalty = -1.0
 
-
         # useful ftn 
         self.sign = lambda x: (x > 0) - (x < 0)
         self.get_reward = reward_ftn      # reward를 계산하는 함수 
@@ -156,6 +155,8 @@ class FuturesEnvironment:
         done = self.get_done(current_timestep=self.current_timestep, next_timestep=next_timestep, 
                              max_strength=self.position_cap, current_strength=self.execution_strength)
         
+        
+        
         # if self.position_cap is not None:
         #     if self.execution_strength > self.position_cap:
         #         done = True 
@@ -164,6 +165,8 @@ class FuturesEnvironment:
         self.next_state = next_state
         self.previous_price = current_price
         self.current_timestep = next_timestep
+
+        done = True if self.dataset.reach_end(self.current_timestep) else False # 마지막 데이터에 대한 종료 
 
         return next_state, reward, done
     
@@ -201,7 +204,7 @@ class FuturesEnvironment:
             f"💼  Current Position   : {self.position_dict[self.current_position]} ({self.current_position})\n"
             f"📊  Execution Strength : {self.execution_strength}/{self.position_cap}\n"
             f"📉  Unrealized PnL     : {self.unrealized_pnl:.2f} KRW\n"
-            f"💰  Current Budget     : {self.current_budget:.2f} KRW\n"
+            f"💰  Current Budget     : {self.current_budget:.2f}/{self.init_budget} KRW\n"
             f"💵  Rate of Return     : {self.current_budget / self.init_budget * 100:.2f} %\n"
             f"⚖️  Avg Entry Price    : {self.average_entry:.2f}\n"
             f"==================================\n"

@@ -1,4 +1,5 @@
 import torch
+import random
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
@@ -41,7 +42,7 @@ class PPOAgent:
             tensor([-0.69])        # log_prob
         )
     '''
-    def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, lam=0.98):
+    def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, lam=0.98):
         '''
         __init__(action_space: Any, n_actions: int, model: nn.Module,
                 value_coeff: float, entropy_coeff: float, clip_eps: float,
@@ -67,8 +68,10 @@ class PPOAgent:
         self.gamma = gamma
         self.lam = lam
 
-        # optimizer 
+        # train related 
         self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        self.epoch = epoch
+        self.batch_size = batch_size
 
     def get_action(self, state):
         '''
@@ -155,20 +158,29 @@ class PPOAgent:
             advantage.insert(0, gae)
 
         return torch.tensor(advantage, dtype=torch.float32).unsqueeze(1)
+    
+    def get_max_power2_batch_size(self, len_data, min_n=4, max_n=9):
+        """
+        len_data 이하에서 사용할 수 있는 최대 2^n 배치 크기를 반환.
+        예: len_data=90 → 64 반환 (2^6)
+        """
+        for n in reversed(range(min_n, max_n + 1)):
+            batch_size = 2 ** n
+            if batch_size <= len_data:
+                return batch_size
+        return 2 ** min_n  # 기본값 (len_data가 너무 작을 경우)
+    
+    
+    def sample_memory(self, memory, advantage):
+        # actual batch size
+        actual_batch_size = self.get_max_power2_batch_size(len(memory))
 
-    def train(self, memory, advantage):
-        '''
-        train(memory: list[tuple], advantage: torch.Tensor) -> float
+        # sampling from raw data 
+        indices = random.sample(range(len(memory)), actual_batch_size)
+        sampled_memory = [memory[i] for i in indices]
 
-        ----------
-        PPO 손실 함수를 계산하고 모델 파라미터를 업데이트한다.
-
-        - 세 가지 손실 항을 포함한다: 
-          (1) value loss, (2) clipped surrogate loss, (3) entropy bonus
-        - GAE로 계산된 advantage를 기반으로 policy와 value를 모두 학습한다.
-        '''
-        # set memory
-        states, actions, rewards, next_states, dones, old_log_probs = zip(*memory)
+        states, actions, rewards, next_states, dones, old_log_probs = zip(*sampled_memory)
+        advantage = advantage[indices]
 
         # zip again to separate ts / agent
         ts_states, ag_states = zip(*states)
@@ -192,27 +204,52 @@ class PPOAgent:
         offset = -self.action_space[0]          # ex : -(-5) = 5
         actions = actions + offset 
 
-        # get current values 
-        self.model.train()
-        current_policy, values = self.model((ts_states, ag_states))
-        action_dist = Categorical(current_policy)                                # entropy bonus 
-        current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
-        current_probs = current_log_probs.exp()
+        return states, actions, rewards, next_states, dones, old_log_probs, advantage
 
-        # 3 elements of loss : value_loss, clip_loss, entropy bonus 
-        with torch.no_grad():
-            _, next_values = self.model(next_states)
-            value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
-        value_loss = F.mse_loss(values.squeeze(), value_target.detach())
-        clip_loss = self.clip_loss_ftn(advantage, old_log_probs.exp(), current_probs)
-        entropy = action_dist.entropy().mean()
+    def train(self, memory, advantage):
+        '''
+        train(memory: list[tuple], advantage: torch.Tensor) -> float
 
-        total_loss = -clip_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy
+        ----------
+        PPO 손실 함수를 계산하고 모델 파라미터를 업데이트한다.
 
-        # back-propagation 
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        self.optimizer.step()
+        - 세 가지 손실 항을 포함한다: 
+          (1) value loss, (2) clipped surrogate loss, (3) entropy bonus
+        - GAE로 계산된 advantage를 기반으로 policy와 value를 모두 학습한다.
+        '''
+        if len(memory) < 16:
+            return
+        
+        losses = 0
 
-        return total_loss.item()
+        for _ in range(self.epoch):
+            # set memory
+            states, actions, rewards, next_states, dones, old_log_probs, advantage = self.sample_memory(memory, advantage)
+
+            # get current values 
+            self.model.train()
+            current_policy, values = self.model(states)
+            action_dist = Categorical(current_policy)                                # entropy bonus 
+            current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
+            current_probs = current_log_probs.exp()
+
+            # 3 elements of loss : value_loss, clip_loss, entropy bonus 
+            with torch.no_grad():
+                _, next_values = self.model(next_states)
+                value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
+
+            value_loss = F.mse_loss(values.squeeze(), value_target.detach())
+            clip_loss = self.clip_loss_ftn(advantage, old_log_probs.exp(), current_probs)
+            entropy = action_dist.entropy().mean()
+
+            total_loss = -clip_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy
+
+            losses += total_loss.item()
+
+            # back-propagation 
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            self.optimizer.step()
+
+            return losses / self.epoch
