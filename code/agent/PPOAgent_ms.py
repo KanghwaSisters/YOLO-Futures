@@ -42,7 +42,7 @@ class PPOAgent:
             tensor([-0.69])        # log_prob
         )
     '''
-    def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, lam=0.98):
+    def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, device, lam=0.98):
         '''
         __init__(action_space: Any, n_actions: int, model: nn.Module,
                 value_coeff: float, entropy_coeff: float, clip_eps: float,
@@ -53,7 +53,8 @@ class PPOAgent:
 
         모델, PPO 관련 계수들, 옵티마이저를 초기화한다.
         '''
-        self.model = model
+        self.model = model.to(device)
+        self.device = device
 
         # action params 
         self.action_space = action_space
@@ -69,7 +70,8 @@ class PPOAgent:
         self.lam = lam
 
         # train related 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        self.lr = lr
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
         self.epoch = epoch
         self.batch_size = batch_size
 
@@ -83,6 +85,7 @@ class PPOAgent:
         - policy에서 확률 분포를 생성하고 행동을 샘플링한다.
         - 샘플링된 행동의 로그 확률도 함께 반환한다.
         '''
+        state = tuple(s.to(self.device) for s in state)
         policy, _ = self.model(state)
 
         # entropy bonus 
@@ -130,15 +133,15 @@ class PPOAgent:
         n_ts_states, n_ag_states = zip(*next_states)
 
         # cat across batch dimension
-        ts_states = torch.cat(ts_states, dim=0)
-        ag_states = torch.cat(ag_states, dim=0)
-        n_ts_states = torch.cat(n_ts_states, dim=0)
-        n_ag_states = torch.cat(n_ag_states, dim=0)
+        ts_states = torch.cat(ts_states, dim=0).to(self.device)
+        ag_states = torch.cat(ag_states, dim=0).to(self.device)
+        n_ts_states = torch.cat(n_ts_states, dim=0).to(self.device)
+        n_ag_states = torch.cat(n_ag_states, dim=0).to(self.device)
 
         states = (ts_states, ag_states)
         next_states = (n_ts_states, n_ag_states)
-        rewards = torch.cat(rewards).view(-1) 
-        dones = torch.cat(dones).view(-1) 
+        rewards = torch.cat(rewards).view(-1).to(self.device)
+        dones = torch.cat(dones).view(-1).to(self.device)
 
         # get values - next_values : GAE 계산을 위함 
         with torch.no_grad():
@@ -157,7 +160,7 @@ class PPOAgent:
             gae = delta + self.gamma * lam * (1 - dones[t]) * gae
             advantage.insert(0, gae)
 
-        return torch.tensor(advantage, dtype=torch.float32).unsqueeze(1)
+        return torch.tensor(advantage, dtype=torch.float32).unsqueeze(1).to(self.device)
     
     def get_max_power2_batch_size(self, len_data, min_n=4, max_n=9):
         """
@@ -187,22 +190,22 @@ class PPOAgent:
         n_ts_states, n_ag_states = zip(*next_states)
 
         # cat across batch dimension
-        ts_states = torch.cat(ts_states, dim=0)
-        ag_states = torch.cat(ag_states, dim=0)
-        n_ts_states = torch.cat(n_ts_states, dim=0)
-        n_ag_states = torch.cat(n_ag_states, dim=0)
+        ts_states = torch.cat(ts_states, dim=0).to(self.device)
+        ag_states = torch.cat(ag_states, dim=0).to(self.device)
+        n_ts_states = torch.cat(n_ts_states, dim=0).to(self.device)
+        n_ag_states = torch.cat(n_ag_states, dim=0).to(self.device)
 
         states = (ts_states, ag_states)
         next_states = (n_ts_states, n_ag_states)
 
         actions = torch.cat(actions)
-        rewards = torch.cat(rewards)
-        dones = torch.cat(dones)
-        old_log_probs = torch.cat(old_log_probs).unsqueeze(1)
+        rewards = torch.cat(rewards).to(self.device)
+        dones = torch.cat(dones).to(self.device)
+        old_log_probs = torch.cat(old_log_probs).unsqueeze(1).to(self.device)
 
         # invert action indices
         offset = -self.action_space[0]          # ex : -(-5) = 5
-        actions = actions + offset 
+        actions = (actions + offset).to(self.device)  
 
         return states, actions, rewards, next_states, dones, old_log_probs, advantage
 
@@ -253,3 +256,10 @@ class PPOAgent:
             self.optimizer.step()
 
             return losses / self.epoch
+        
+
+    def load_model(self, state_dict):
+        self.model.load_state_dict(state_dict)
+
+    def set_optimizer(self, new_optimizer):
+        self.optimizer = new_optimizer(self.model.parameters(), lr=self.lr)
