@@ -37,6 +37,12 @@ class FuturesEnvironment:
         self.contract_unit = 50000         # 거래 단위가 1포인트 당 5만원 (미니 선물)
 
         # current info 
+        # -[ type of info ]-------------------------------------
+        # '' : done=False, 'margin_call' : 마진콜, 
+        # 'end_of_data' : 마지막 데이터, 'the_poor' : 도부, 
+        # 'maturity_date' : 만기일, 'max_contract' : 최대 계약수 도달 
+        # ------------------------------------------------------
+        self.info = ''      
         self.init_budget = start_budget
         self.current_budget = start_budget
         self.unrealized_pnl = 0
@@ -103,12 +109,16 @@ class FuturesEnvironment:
         unrealized_pnl = price_diff * direction * contracts * self.contract_unit
         return unrealized_pnl
     
-    def _get_current_position_strength(self, action):
+    def get_current_position_strength(self, action):
         # 이전 체결 데이터를 가져와 현재 행동을 반영한다. 
         previous_execution = self.current_position * self.execution_strength
 
         # 행동 이후의 체결 계약 수와 포지션을 업데이트한다. 
         current_execution = previous_execution + action
+
+        if current_execution == 0:
+            return 0, 0
+        
         execution_strength = abs(current_execution)
         current_position = self.sign(current_execution)
 
@@ -136,7 +146,7 @@ class FuturesEnvironment:
         realized_pnl = self._get_realized_pnl(self.previous_price, prev_execution, action)
         self._cal_ave_entry_price(self.previous_price, prev_execution, new_execution, action)
 
-        self.current_position, self.execution_strength = self._get_current_position_strength(action)
+        self.current_position, self.execution_strength = self.get_current_position_strength(action)
 
         # 4. PnL 및 Budget
         self.prev_unrealized_pnl = self.unrealized_pnl
