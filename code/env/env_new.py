@@ -34,7 +34,16 @@ class RiskMetrics:
         if len(self.returns_history) < 2:
             return 0.0
         returns = np.array(self.returns_history)
-        return np.mean(returns) / (np.std(returns) + 1e-8)
+        mean_return = np.mean(returns)
+        std_return = np.std(returns)
+        
+        # 표준편차가 0에 가까우면 0 반환 (division by zero 방지)
+        if std_return < 1e-8:
+            return 0.0
+        
+        sharpe = mean_return / std_return
+        # 극값 제한
+        return np.clip(sharpe, -10.0, 10.0)
     
     def get_max_drawdown(self) -> float:
         # 최대 낙폭 계산 (최대 누적손실)
@@ -303,13 +312,13 @@ class ImprovedFuturesEnvironment:
 
         # 7. 일일 수익률 계산 및 리스크 메트릭 업데이트
         daily_return = net_realized_pnl / self.init_budget
+        self.daily_returns.append(daily_return)
         self.risk_metrics.update(net_realized_pnl, daily_return)
 
-        # 8. 시장 상태 업데이트
+        # 8. 시장 상태 업데이트 (필요시 주석 해제)
         # current_idx = self.df.index.get_loc(self.current_timestep)
         # start_idx = max(0, current_idx - self.window_size)
         # price_data = self.df['close'].iloc[start_idx:current_idx].values
-
         # self._update_market_regime(price_data)
 
         # 9. 다음 상태 생성 (여기에 시장 정보 포함)
@@ -321,14 +330,16 @@ class ImprovedFuturesEnvironment:
             **market_features
         )
 
-        # 10. 보상 계산 (미실현손익, 리스크, 거래 비용 등 고려)
+        # 10. 보상 계산 (Sharpe ratio 기반 reward 함수 호출)
         reward = self.get_reward(
             unrealized_pnl=self.unrealized_pnl,
             prev_unrealized_pnl=self.prev_unrealized_pnl,
             current_budget=self.current_budget,
             transaction_cost=total_cost,
-            risk_metrics=self.risk_metrics,
-            market_regime=self.market_regime
+            risk_metrics=self.risk_metrics,  # Sharpe ratio를 위해 RiskMetrics 객체 전달
+            market_regime=self.market_regime,
+            daily_return=daily_return,
+            net_realized_pnl=net_realized_pnl
         )
 
         # 11. 종료 여부 판단 (마진콜, 리스크 한계, 당일 청산 등)
@@ -384,7 +395,7 @@ class ImprovedFuturesEnvironment:
         return unrealized_pnl
     
     def _cal_ave_entry_price(self, current_price: float, prev_execution: int, new_execution: int, action: int):
-        """포지션 진입 시 평균 진입가 계산 및 업데이트"""
+        """포지션 진입 시 평균 진입가 계산 및 업데이터"""
         remaining_execution = new_execution
         
         if remaining_execution != 0:
