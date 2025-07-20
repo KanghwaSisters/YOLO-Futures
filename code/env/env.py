@@ -5,10 +5,11 @@ from env.reward_ftn import *
 from datahandler.dataset import *
 
 class FuturesEnvironment:
-    def __init__(self, full_df:pd.DataFrame, date_range:tuple, window_size:int, state_type, reward_ftn, done_ftn, start_budget, position_cap=None, scaler=None):
+    def __init__(self, full_df:pd.DataFrame, date_range:tuple, window_size:int, state_type, reward_ftn, done_ftn, start_budget, n_actions, position_cap=float('inf'), scaler=None):
         ## inner infomation 
         self._full_df = full_df
         self._date_range = date_range
+        self.n_actions = n_actions
 
         # set sliced df 
         self.df = self._slice_by_date(full_df, date_range)
@@ -28,6 +29,7 @@ class FuturesEnvironment:
         self.position_dict = {-1 : 'short', 0 : 'hold', 1 : 'long'}
         self.execution_strength = 0        # 체결 계약 수 
         self.position_cap = position_cap   # 최대 계약 수 : 상한 
+        self.single_execution_cap = self.n_actions // 2
 
         # 시장 정보 
         self.previous_price = None
@@ -43,6 +45,7 @@ class FuturesEnvironment:
         # 'maturity_date' : 만기일, 'max_contract' : 최대 계약수 도달 
         # ------------------------------------------------------
         self.info = ''      
+        self.mask = [1] *  self.n_actions      # shape [n_actions] with 1 (valid) or 0 (invalid)
         self.init_budget = start_budget
         self.current_budget = start_budget
         self.unrealized_pnl = 0
@@ -56,6 +59,32 @@ class FuturesEnvironment:
         self.sign = lambda x: (x > 0) - (x < 0)
         self.get_reward = reward_ftn      # reward를 계산하는 함수 
         self.get_done = done_ftn
+
+    def get_mask(self):
+        remaining_strength = self.position_cap - self.execution_strength
+
+        if self.info == 'max_contract':
+            if self.current_position == -1: # short 
+                mask = [0] * self.single_execution_cap + [1] * (self.single_execution_cap+1)
+            elif self.current_position == 1: # long 
+                mask = [1] * (self.single_execution_cap+1) + [0] * self.single_execution_cap 
+
+        elif (remaining_strength) < self.single_execution_cap:
+            # 최대 체결 가능 계약수에 근접하여 일부 행동에 제약이 있다. 
+            restricted_action = self.single_execution_cap - remaining_strength 
+
+            if self.current_position == -1: # short 
+                mask = [0] * restricted_action + [1] * (self.n_actions - restricted_action)
+            elif self.current_position == 1: # long 
+                mask = [1] * (self.n_actions - restricted_action) + [0] * restricted_action
+
+        else:
+            mask = [1] *  self.n_actions
+
+        return mask
+            
+
+
 
     def _slice_by_date(self, full_df, date_range):
         full_df = full_df.copy()
@@ -166,6 +195,7 @@ class FuturesEnvironment:
                              max_strength=self.position_cap, current_strength=self.execution_strength)
         
         
+        self.mask = self.get_mask()
         
         # if self.position_cap is not None:
         #     if self.execution_strength > self.position_cap:
@@ -192,6 +222,7 @@ class FuturesEnvironment:
 
         self.previous_price = close_price
         self.current_timestep = timestep
+        self.mask = [1] *  self.n_actions
 
         return self.state(fixed_state, 
                           current_position=self.current_position, 

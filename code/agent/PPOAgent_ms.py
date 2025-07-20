@@ -75,7 +75,7 @@ class PPOAgent:
         self.epoch = epoch
         self.batch_size = batch_size
 
-    def get_action(self, state):
+    def get_action(self, state, mask=None):
         '''
         get_action(state: torch.Tensor) -> tuple[int, float]
 
@@ -86,10 +86,15 @@ class PPOAgent:
         - 샘플링된 행동의 로그 확률도 함께 반환한다.
         '''
         state = tuple(s.to(self.device) for s in state)
-        policy, _ = self.model(state)
+        logits, _ = self.model(state)
+
+        if mask is not None:
+            # mask: shape [n_actions] with 1 (valid) or 0 (invalid)
+            mask = torch.tensor(mask, dtype=torch.bool).to(self.device)
+            logits = logits.masked_fill(mask == 0, float('-inf'))
 
         # entropy bonus 
-        action_dist = Categorical(policy)
+        action_dist = Categorical(logits=logits)
         _action = action_dist.sample()
         log_prob = action_dist.log_prob(_action)
 
@@ -126,7 +131,7 @@ class PPOAgent:
         - GAE를 사용하면 bias-variance trade-off를 조절할 수 있다.
         '''
         # set memory
-        states, _, rewards, next_states, dones, _ = zip(*memory)
+        states, _, rewards, next_states, dones, _, _ = zip(*memory)
 
         # zip again to separate ts / agent
         ts_states, ag_states = zip(*states)
@@ -182,8 +187,8 @@ class PPOAgent:
         indices = random.sample(range(len(memory)), actual_batch_size)
         sampled_memory = [memory[i] for i in indices]
 
-        states, actions, rewards, next_states, dones, old_log_probs = zip(*sampled_memory)
-        advantage = advantage[indices]
+        states, actions, rewards, next_states, dones, old_log_probs, masks = zip(*sampled_memory)
+        advantages = advantage[indices]
 
         # zip again to separate ts / agent
         ts_states, ag_states = zip(*states)
@@ -202,12 +207,13 @@ class PPOAgent:
         rewards = torch.cat(rewards).to(self.device)
         dones = torch.cat(dones).to(self.device)
         old_log_probs = torch.cat(old_log_probs).unsqueeze(1).to(self.device)
+        masks = torch.cat(masks).to(self.device)
 
         # invert action indices
         offset = -self.action_space[0]          # ex : -(-5) = 5
         actions = (actions + offset).to(self.device)  
 
-        return states, actions, rewards, next_states, dones, old_log_probs, advantage
+        return states, actions, rewards, next_states, dones, old_log_probs, advantages, masks
 
 
     def train(self, memory, advantage):
@@ -228,12 +234,18 @@ class PPOAgent:
 
         for _ in range(self.epoch):
             # set memory
-            states, actions, rewards, next_states, dones, old_log_probs, advantage = self.sample_memory(memory, advantage)
+            states, actions, rewards, next_states, dones, old_log_probs, advantages, masks = self.sample_memory(memory, advantage)
 
             # get current values 
             self.model.train()
-            current_policy, values = self.model(states)
-            action_dist = Categorical(current_policy)                                # entropy bonus 
+            current_logits, values = self.model(states)
+
+            if masks is not None:
+                # mask: shape [n_actions] with 1 (valid) or 0 (invalid)
+                current_logits = current_logits.masked_fill(masks == 0, float('-inf'))
+
+            # entropy bonus 
+            action_dist = Categorical(logits=current_logits)                        
             current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
             current_probs = current_log_probs.exp()
 
@@ -243,7 +255,7 @@ class PPOAgent:
                 value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
             value_loss = F.mse_loss(values.squeeze(), value_target.detach())
-            clip_loss = self.clip_loss_ftn(advantage, old_log_probs.exp(), current_probs)
+            clip_loss = self.clip_loss_ftn(advantages, old_log_probs.exp(), current_probs)
             entropy = action_dist.entropy().mean()
 
             total_loss = -clip_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy

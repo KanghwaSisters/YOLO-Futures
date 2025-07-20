@@ -45,5 +45,5 @@ CONFIG = EasyDict({
     'REWARD_FTN': None,  # 외부에서 정의
     'DONE_FTN': None,    # 외부에서 정의
     'SCALER': None,      # 외부에서 정의
-    'PATH': '/Users/ijimin/Documents/GitHub/YOLO-Futures/result',
+    'PATH': '/Users/ijimin/Documents/GitHub/YOLO-Futures/logs',
 })

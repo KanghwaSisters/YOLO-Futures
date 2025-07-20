@@ -315,9 +315,9 @@ class MultiStatePV(nn.Module):
         x = self.fusion_fc2(x)
 
         actor_x = F.tanh(self.actor_fc1(x))
-        policy = F.softmax(self.actor_fc2(actor_x), dim=-1)
+        logits = self.actor_fc2(actor_x)
 
         critic_x = F.tanh(self.critic_fc1(x))
         value = self.critic_fc2(critic_x)
         
-        return policy, value
+        return logits, value

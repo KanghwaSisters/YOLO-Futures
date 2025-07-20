@@ -143,6 +143,7 @@ class NonEpisodicTrainer:
                                         reward_ftn=self.reward_ftn, 
                                         done_ftn=self.done_ftn, 
                                         start_budget=self.start_budget,
+                                        n_actions=self.agent.n_actions,
                                         scaler=self.scaler,
                                         position_cap=self.position_cap)
         
@@ -153,6 +154,7 @@ class NonEpisodicTrainer:
                                         reward_ftn=self.reward_ftn, 
                                         done_ftn=self.done_ftn, 
                                         start_budget=self.start_budget,
+                                        n_actions=self.agent.n_actions,
                                         scaler=self.scaler,
                                         position_cap=self.position_cap)
         
@@ -193,8 +195,9 @@ class NonEpisodicTrainer:
             for _ in range(self.n_steps):
                 if done:
                     break
+                mask = env.mask
 
-                action, log_prob = agent.get_action(state)
+                action, log_prob = agent.get_action(state, mask)
                 next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
 
@@ -209,7 +212,8 @@ class NonEpisodicTrainer:
                     torch.tensor([reward], dtype=torch.float32).to(self.device),
                     next_state,
                     torch.tensor([done], dtype=torch.float32).to(self.device),
-                    torch.tensor([log_prob], dtype=torch.float32).to(self.device)
+                    torch.tensor([log_prob], dtype=torch.float32).to(self.device),
+                    torch.tensor([mask], dtype=torch.bool).to(self.device)
                 ])
 
                 # update step 지표 
