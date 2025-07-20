@@ -145,16 +145,16 @@ class PPOAgent:
 
         states = (ts_states, ag_states)
         next_states = (n_ts_states, n_ag_states)
-        rewards = torch.cat(rewards).view(-1).to(self.device)
-        dones = torch.cat(dones).view(-1).to(self.device)
+        rewards = torch.cat(rewards).view(-1)
+        dones = torch.cat(dones).view(-1)
 
         # get values - next_values : GAE 계산을 위함 
         with torch.no_grad():
             _, values = self.model(states)
             _, next_values = self.model(next_states)
 
-        values = values.squeeze()
-        next_values = next_values.squeeze()
+        values = values.squeeze().detach()
+        next_values = next_values.squeeze().detach()
 
         # Generalize Advantage Estimate(GAE) calculation
         # reversed list로 delta -> gae를 계산한다. 
@@ -165,7 +165,7 @@ class PPOAgent:
             gae = delta + self.gamma * lam * (1 - dones[t]) * gae
             advantage.insert(0, gae)
 
-        return torch.tensor(advantage, dtype=torch.float32).unsqueeze(1).to(self.device)
+        return torch.tensor(advantage, dtype=torch.float32).unsqueeze(1)
     
     def get_max_power2_batch_size(self, len_data, min_n=4, max_n=9):
         """
@@ -188,7 +188,7 @@ class PPOAgent:
         sampled_memory = [memory[i] for i in indices]
 
         states, actions, rewards, next_states, dones, old_log_probs, masks = zip(*sampled_memory)
-        advantages = advantage[indices]
+        advantages = advantage[indices].to(self.device)
 
         # zip again to separate ts / agent
         ts_states, ag_states = zip(*states)

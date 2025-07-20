@@ -208,12 +208,12 @@ class NonEpisodicTrainer:
 
                 memory.append([
                     state,
-                    torch.tensor([[action]]).to(self.device),
-                    torch.tensor([reward], dtype=torch.float32).to(self.device),
+                    torch.tensor([[action]]),
+                    torch.tensor([reward], dtype=torch.float32),
                     next_state,
-                    torch.tensor([done], dtype=torch.float32).to(self.device),
-                    torch.tensor([log_prob], dtype=torch.float32).to(self.device),
-                    torch.tensor([mask], dtype=torch.bool).to(self.device)
+                    torch.tensor([done], dtype=torch.float32),
+                    torch.tensor([log_prob], dtype=torch.float32),
+                    torch.tensor([mask], dtype=torch.bool)
                 ])
 
                 # update step 지표 
@@ -252,7 +252,7 @@ class NonEpisodicTrainer:
             avg_reward = np.mean(moving_avg_rewards)
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
-            print(f"[ {self.dataset_flag} |Train] Episode {episode} | Loss: {loss: .4f} | (short : {int(action_prop[-1])} %, hold : {int(action_prop[0])}%, long: {int(action_prop[1])}%) | (Ave) Strength: {np.mean(episode_execution_strengths):.2f} |Reward: {ep_reward:3.0f} | Avg({self.ma_interval}): {avg_reward: .2f} | Maintained Len: {maintained_steps}")
+            print(f"[{self.dataset_flag}|Train] Episode {episode} | Loss: {loss: .4f} | (short : {int(action_prop[-1])} %, hold : {int(action_prop[0])}%, long: {int(action_prop[1])}%) | (Ave) Strength: {np.mean(episode_execution_strengths):.2f} |Reward: {ep_reward:3.0f} | Avg({self.ma_interval}): {avg_reward: .2f} | Maintained Len: {maintained_steps}")
 
             if (episode+1) % 50 == 0:
                 print(env)
@@ -339,7 +339,7 @@ class NonEpisodicTrainer:
             avg_reward = np.mean(moving_avg_rewards)
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
-            print(f"[{self.dataset_flag} : {model_name} |Valid] Episode {episode} |(short : {int(action_prop[-1])} %, hold : {int(action_prop[0])}%, long: {int(action_prop[1])}%) | (Ave) Strength: {np.mean(episode_execution_strengths):.2f} |Reward: {ep_reward:3.0f} | Avg({self.ma_interval}): {avg_reward: .2f} | Maintained Steps: {maintained_steps}")
+            print(f"[{self.dataset_flag}: {model_name} |Valid] Episode {episode} |(short : {int(action_prop[-1])} %, hold : {int(action_prop[0])}%, long: {int(action_prop[1])}%) | (Ave) Strength: {np.mean(episode_execution_strengths):.2f} |Reward: {ep_reward:3.0f} | Avg({self.ma_interval}): {avg_reward: .2f} | Maintained Steps: {maintained_steps}")
 
             if (episode+1) % 50 == 0:
                 print(env)
