@@ -26,6 +26,7 @@ class MarketEnvironment:
 
         # 시장 정보 
         self.previous_price = None
+        self.contract_unit = 50000
 
         # current info 
         self.current_timestep = date_range[0]
@@ -119,12 +120,12 @@ class MarketEnvironment:
             f"=== Futures Trading Environment ===\n"
             f"⏱️  Current Timestep   : {self.current_timestep}\n"
             f"📈  Previous Close     : {self.previous_price:.2f}\n"
-            f"💼  Current Position   : {self.position_dict[self.current_position]} ({self.current_position})\n"
-            f"📊  Execution Strength : {self.execution_strength}/{self.position_cap}\n"
-            f"📉  Unrealized PnL     : {self.unrealized_pnl:.2f} KRW\n"
-            f"💰  Current Budget     : {self.current_budget:.2f} KRW\n"
-            f"💵  Rate of Return     : {self.current_budget / self.init_budget * 100:.2f} %\n"
-            f"⚖️  Avg Entry Price    : {self.average_entry:.2f}\n"
+            f"💼  Current Position   : {self.account.position_dict[self.account.current_position]} ({self.account.current_position})\n"
+            f"📊  Execution Strength : {self.account.execution_strength}/{self.account.position_cap}\n"
+            f"📉  Unrealized PnL     : {self.account.unrealized_pnl:.2f} KRW\n"
+            f"💰  Current Budget     : {self.account.available_balance:.2f} KRW\n"
+            f"💵  Rate of Return     : {self.account.available_balance / self.account.initial_budget * 100:.2f} %\n"
+            f"⚖️  Avg Entry Price    : {self.account.average_entry:.2f}\n"
             f"==================================\n"
         )
     
