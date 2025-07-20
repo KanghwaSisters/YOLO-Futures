@@ -41,7 +41,7 @@ class FuturesEnvironment:
         # current info 
         # -[ type of info ]-------------------------------------
         # '' : done=False, 'margin_call' : 마진콜, 
-        # 'end_of_data' : 마지막 데이터, 'the_poor' : 도부, 
+        # 'end_of_data' : 마지막 데이터, 'bankrupt' : 도부, 
         # 'maturity_date' : 만기일, 'max_contract' : 최대 계약수 도달 
         # ------------------------------------------------------
         self.info = ''      
@@ -82,9 +82,6 @@ class FuturesEnvironment:
             mask = [1] *  self.n_actions
 
         return mask
-            
-
-
 
     def _slice_by_date(self, full_df, date_range):
         full_df = full_df.copy()
@@ -182,7 +179,7 @@ class FuturesEnvironment:
         self.unrealized_pnl = self._get_unrealized_pnl()
         self.current_budget += realized_pnl
 
-        # 5. State, reward, done
+        # 5. State, reward, done, mask 
         next_state = self.state(next_fixed_state, 
                                 current_position=self.current_position, 
                                 execution_strength=self.execution_strength)
@@ -194,22 +191,41 @@ class FuturesEnvironment:
         done = self.get_done(current_timestep=self.current_timestep, next_timestep=next_timestep, 
                              max_strength=self.position_cap, current_strength=self.execution_strength)
         
-        
         self.mask = self.get_mask()
-        
-        # if self.position_cap is not None:
-        #     if self.execution_strength > self.position_cap:
-        #         done = True 
 
         # 6. Update
         self.next_state = next_state
         self.previous_price = current_price
         self.current_timestep = next_timestep
 
-        done = True if self.dataset.reach_end(self.current_timestep) else False # 마지막 데이터에 대한 종료 
+        # 7. Handle done 
+        done = True if self.is_dataset_reached_end(self.current_timestep) else False # 마지막 데이터에 대한 종료 
+        done = True if self.is_near_margin_call() else False
+        done = True if self.is_maturity_date() else False
+        done = True if self.is_bankrupt() else False
 
         return next_state, reward, done
     
+    def is_dataset_reached_end(self, current_timestep):
+        flag = self.dataset.reach_end(current_timestep)
+        self.info = 'end_of_data' if flag is True else ''
+        return flag
+
+    def is_near_margin_call(self):
+        flag = False
+        self.info = 'margin_call' if flag is True else ''
+        return flag 
+    
+    def is_maturity_date(self):
+        flag = False 
+        self.info = 'maturity_date' if flag is True else ''
+        return flag 
+    
+    def is_bankrupt(self):
+        flag = False 
+        self.info = 'bankrupt' if flag is True else ''
+        return flag 
+
     def reset(self): 
         # 진짜 0스텝부터 돌아가는 매서드 
         self.data_iterator = iter(self.dataset) # init iterator 
