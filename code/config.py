@@ -12,6 +12,7 @@ CONFIG = EasyDict({
     'TRAIN_VALID_TIMESTEP': None,  # 외부에서 정의해야 함
 
     # PPO Agent 설정
+    'SINGLE_EXECUTION_CAP' : 4,
     'N_ACTIONS': 9,
     'ACTION_SPACE': list(range(-4, 5)),
     'GAMMA': 0.99,
