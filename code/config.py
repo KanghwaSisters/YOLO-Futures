@@ -25,7 +25,7 @@ CONFIG = EasyDict({
 
     # 모델 설정
     'INPUT_DIM': None,  # 외부에서 target_values로부터 정의
-    'AGENT_INPUT_DIM': 2,
+    'AGENT_INPUT_DIM': 10,
     'EMBED_DIM': 32,
     'KERNEL_SIZE': 4,
     'STRIDE': 1,
