@@ -23,3 +23,63 @@ def reward_unrealized_pnl_diff_log(**kwargs):
         return float(np.log(ratio))
 
     return 0.0
+
+def risk_adjusted_pnl_reward(hold_over_penalty=-0.05, 
+                             margin_call_penalty=-10.0, 
+                             maturity_date_penalty=-10.0,
+                             bankrupt_penalty=-10.0, 
+                             initial_budget=1_000_000, 
+                             env_info='',
+                             **kwargs):
+    
+    # 1. 미실현 손익의 변화량 
+    delta_unrealized_pnl = (kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']) 
+
+    # 2. 실현 손익의 변화량 
+    realized_pnl = kwargs['realized_pnl'] 
+
+    # 3. 실현 손익과 미실현 손익을 더한 reward
+    reward = (delta_unrealized_pnl + realized_pnl) / initial_budget
+
+    # 4. 장기 보유 시 패널티 부여
+    if kwargs['unrealized_pnl'] != 0:
+        reward += hold_over_penalty
+
+    # 5. 마진콜일 때 패널티 부여 
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+
+    # 6. 파산일 때 패널티 부여 
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+
+    # 7. 만기일일 때 패널티 부여 
+    elif env_info == 'maturity_date':
+        reward += maturity_date_penalty
+
+    return reward 
+
+
+def pnl_change_based_reward(margin_call_penalty=-10.0, 
+                            bankrupt_penalty=-10.0,
+                            maturity_date_penalty=-10.0,
+                            env_info='',
+                            initial_budget=1_000_000, 
+                            **kwargs):
+
+    pnl_change = (kwargs['current_price'] - kwargs['pev_price']) * kwargs['execution_strength']
+    reward = pnl_change + (kwargs['realized_pnl'] / initial_budget)
+
+    # 5. 마진콜일 때 패널티 부여 
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+
+    # 6. 파산일 때 패널티 부여 
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+
+    # 7. 만기일일 때 패널티 부여 
+    elif env_info == 'maturity_date':
+        reward += maturity_date_penalty
+
+    return reward

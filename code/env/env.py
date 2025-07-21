@@ -186,6 +186,9 @@ class FuturesEnvironment:
         
         reward = self.get_reward(unrealized_pnl=self.unrealized_pnl, 
                                  prev_unrealized_pnl=self.prev_unrealized_pnl,
+                                 realized_pnl=realized_pnl,
+                                 env_info=self.info,
+                                 initial_budget=self.init_budget,
                                  current_budget=self.current_budget)
         
         done = self.get_done(current_timestep=self.current_timestep, next_timestep=next_timestep, 
@@ -199,10 +202,10 @@ class FuturesEnvironment:
         self.current_timestep = next_timestep
 
         # 7. Handle done 
-        done = True if self.is_dataset_reached_end(self.current_timestep) else False # 마지막 데이터에 대한 종료 
         done = True if self.is_near_margin_call() else False
         done = True if self.is_maturity_date() else False
         done = True if self.is_bankrupt() else False
+        done = True if self.is_dataset_reached_end(self.current_timestep) else False # 마지막 데이터에 대한 종료 
 
         return next_state, reward, done
     
