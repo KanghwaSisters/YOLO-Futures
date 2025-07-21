@@ -204,7 +204,9 @@ class Account:
 
             # 미실현 손익 -> 실현 손익 전환
             self.realized_pnl += daily_settle
+            self.recent_realized_pnl = daily_settle * self.contract_unit
             self.unrealized_pnl = 0
+            self.ave_unrealized_pnl = 0
 
     def update_account(self, market_pt):
         if self.execution_strength != 0:
