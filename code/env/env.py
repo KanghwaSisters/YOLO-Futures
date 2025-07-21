@@ -149,6 +149,16 @@ class FuturesEnvironment:
         self.total_transaction_costs = 0
         
         # 시장 상태 초기값
+        self.market_features = {
+            'market_regime': 0,
+            'volatility_regime': {'low': -1, 'normal': 0, 'high': 1}['low'],
+            'sharpe_ratio': 0,
+            'max_drawdown': 0,
+            'volatility': 0,
+            'win_rate': 0,
+            'total_trades': 0,
+            'transaction_cost_ratio': 0
+        }
         self.market_regime = MarketRegime.SIDEWAYS
         self.volatility_regime = 'normal'  # low, normal, high
         
@@ -156,6 +166,7 @@ class FuturesEnvironment:
         self.sign = lambda x: (x > 0) - (x < 0)
         self.get_reward = reward_ftn
         self.get_done = done_ftn
+
         # 성과 추적용 리스트
         self.daily_returns = []
         self.trade_history = []
@@ -296,26 +307,26 @@ class FuturesEnvironment:
             'total_trades': self.total_trades,
             'transaction_cost_ratio': self.total_transaction_costs / self.init_budget
         }
+
+    def _is_dataset_reached_end(self, current_timestep):
+        done = self.dataset.reach_end(current_timestep)
+        info = 'end_of_data' if done is True else ''
+        return done, info 
+
+    def _is_near_margin_call(self):
+        done = False
+        info = 'margin_call' if done is True else ''
+        return done, info
     
-    def _update_info_status(self, done: bool):
-        """기존 코드 호환성을 위한 info 상태 업데이트"""
-        if done:
-            # 마진콜 체크
-            if self._check_margin_call():
-                self.info = 'margin_call'
-            # 리스크 한계 초과 체크 (파산으로 간주)
-            elif self._check_risk_limits():
-                self.info = 'the_poor'
-            # 최대 계약 수 초과 체크
-            elif self.position_cap is not None and self.execution_strength >= self.position_cap:
-                self.info = 'max_contract'
-            # 데이터 끝 체크
-            elif self.dataset.reach_end(self.current_timestep):
-                self.info = 'end_of_data'
-            else:
-                self.info = ''
-        else:
-            self.info = ''
+    def _is_maturity_date(self):
+        done = False 
+        info = 'maturity_date' if done is True else ''
+        return done, info
+    
+    def _is_bankrupt(self):
+        done = False 
+        info = 'bankrupt' if done is True else ''
+        return done , info
     
     def step(self, action: int):
         """
@@ -417,21 +428,24 @@ class FuturesEnvironment:
             intraday_only=self.intraday_only
         )
 
-        # 12. 데이터 끝 체크 (기존 코드 호환성)
-        if self.dataset.reach_end(next_timestep):
-            done = True
+        # 12. action space에 대한 마스크 생성 
+        self.mask = self.get_mask()
 
-        # 13. info 상태 업데이트 (기존 코드 호환성을 위해)
-        self._update_info_status(done)
-
-        # 14. 종료되면 남은 포지션 강제 청산
-        if done and self.execution_strength > 0:
-            self._force_liquidate_all_positions()
-
-        # 15. 상태 및 변수 업데이트
+        # 
         self.next_state = next_state
         self.previous_price = current_price
         self.current_timestep = next_timestep
+
+        # 13. 선물 데이터에서 추가 done 상황 + update info 
+        done, self.info = self._is_near_margin_call() 
+        done, self.info = self._is_maturity_date() 
+        done, self.info = self._is_bankrupt() 
+        done, self.info = self._is_dataset_reached_end(self.current_timestep)
+
+
+        # # 14. 종료되면 남은 포지션 강제 청산
+        # if done and self.execution_strength > 0:
+        #     self._force_liquidate_all_positions()
 
         # 16. 다음 상태, 보상, 종료 플래그 반환
         return next_state, reward, done
@@ -540,13 +554,15 @@ class FuturesEnvironment:
         self.data_iterator = iter(self.dataset)
         fixed_state, close_price, timestep = next(self.data_iterator)
         
+        self.mask = [1] *  self.n_actions
         self.previous_price = close_price
         self.current_timestep = timestep
         
         return self.state(
             fixed_state, 
             current_position=self.current_position,
-            execution_strength=self.execution_strength
+            execution_strength=self.execution_strength,
+            **self.market_features
         )
     
     def conti(self):
