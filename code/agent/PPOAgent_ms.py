@@ -1,4 +1,5 @@
 import torch
+import random
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
@@ -41,7 +42,7 @@ class PPOAgent:
             tensor([-0.69])        # log_prob
         )
     '''
-    def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, lam=0.98):
+    def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, device, lam=0.98):
         '''
         __init__(action_space: Any, n_actions: int, model: nn.Module,
                 value_coeff: float, entropy_coeff: float, clip_eps: float,
@@ -52,7 +53,8 @@ class PPOAgent:
 
         모델, PPO 관련 계수들, 옵티마이저를 초기화한다.
         '''
-        self.model = model
+        self.model = model.to(device)
+        self.device = device
 
         # action params 
         self.action_space = action_space
@@ -67,10 +69,13 @@ class PPOAgent:
         self.gamma = gamma
         self.lam = lam
 
-        # optimizer 
-        self.optimizer = optim.Adam(self.model.parameters(), lr=lr)
+        # train related 
+        self.lr = lr
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        self.epoch = epoch
+        self.batch_size = batch_size
 
-    def get_action(self, state):
+    def get_action(self, state, mask=None):
         '''
         get_action(state: torch.Tensor) -> tuple[int, float]
 
@@ -80,10 +85,16 @@ class PPOAgent:
         - policy에서 확률 분포를 생성하고 행동을 샘플링한다.
         - 샘플링된 행동의 로그 확률도 함께 반환한다.
         '''
-        policy, _ = self.model(state)
+        state = tuple(s.to(self.device) for s in state)
+        logits, _ = self.model(state)
+
+        if mask is not None:
+            # mask: shape [n_actions] with 1 (valid) or 0 (invalid)
+            mask = torch.tensor(mask, dtype=torch.bool).to(self.device)
+            logits = logits.masked_fill(mask == 0, float('-inf'))
 
         # entropy bonus 
-        action_dist = Categorical(policy)
+        action_dist = Categorical(logits=logits)
         _action = action_dist.sample()
         log_prob = action_dist.log_prob(_action)
 
@@ -120,30 +131,30 @@ class PPOAgent:
         - GAE를 사용하면 bias-variance trade-off를 조절할 수 있다.
         '''
         # set memory
-        states, _, rewards, next_states, dones, _ = zip(*memory)
+        states, _, rewards, next_states, dones, _, _ = zip(*memory)
 
         # zip again to separate ts / agent
         ts_states, ag_states = zip(*states)
         n_ts_states, n_ag_states = zip(*next_states)
 
         # cat across batch dimension
-        ts_states = torch.cat(ts_states, dim=0)
-        ag_states = torch.cat(ag_states, dim=0)
-        n_ts_states = torch.cat(n_ts_states, dim=0)
-        n_ag_states = torch.cat(n_ag_states, dim=0)
+        ts_states = torch.cat(ts_states, dim=0).to(self.device)
+        ag_states = torch.cat(ag_states, dim=0).to(self.device)
+        n_ts_states = torch.cat(n_ts_states, dim=0).to(self.device)
+        n_ag_states = torch.cat(n_ag_states, dim=0).to(self.device)
 
         states = (ts_states, ag_states)
         next_states = (n_ts_states, n_ag_states)
-        rewards = torch.cat(rewards).view(-1) 
-        dones = torch.cat(dones).view(-1) 
+        rewards = torch.cat(rewards).view(-1)
+        dones = torch.cat(dones).view(-1)
 
         # get values - next_values : GAE 계산을 위함 
         with torch.no_grad():
             _, values = self.model(states)
             _, next_values = self.model(next_states)
 
-        values = values.squeeze()
-        next_values = next_values.squeeze()
+        values = values.squeeze().detach()
+        next_values = next_values.squeeze().detach()
 
         # Generalize Advantage Estimate(GAE) calculation
         # reversed list로 delta -> gae를 계산한다. 
@@ -155,6 +166,55 @@ class PPOAgent:
             advantage.insert(0, gae)
 
         return torch.tensor(advantage, dtype=torch.float32).unsqueeze(1)
+    
+    def get_max_power2_batch_size(self, len_data, min_n=4, max_n=9):
+        """
+        len_data 이하에서 사용할 수 있는 최대 2^n 배치 크기를 반환.
+        예: len_data=90 → 64 반환 (2^6)
+        """
+        for n in reversed(range(min_n, max_n + 1)):
+            batch_size = 2 ** n
+            if batch_size <= len_data:
+                return batch_size
+        return 2 ** min_n  # 기본값 (len_data가 너무 작을 경우)
+    
+    
+    def sample_memory(self, memory, advantage):
+        # actual batch size
+        actual_batch_size = self.get_max_power2_batch_size(len(memory))
+
+        # sampling from raw data 
+        indices = random.sample(range(len(memory)), actual_batch_size)
+        sampled_memory = [memory[i] for i in indices]
+
+        states, actions, rewards, next_states, dones, old_log_probs, masks = zip(*sampled_memory)
+        advantages = advantage[indices].to(self.device)
+
+        # zip again to separate ts / agent
+        ts_states, ag_states = zip(*states)
+        n_ts_states, n_ag_states = zip(*next_states)
+
+        # cat across batch dimension
+        ts_states = torch.cat(ts_states, dim=0).to(self.device)
+        ag_states = torch.cat(ag_states, dim=0).to(self.device)
+        n_ts_states = torch.cat(n_ts_states, dim=0).to(self.device)
+        n_ag_states = torch.cat(n_ag_states, dim=0).to(self.device)
+
+        states = (ts_states, ag_states)
+        next_states = (n_ts_states, n_ag_states)
+
+        actions = torch.cat(actions)
+        rewards = torch.cat(rewards).to(self.device)
+        dones = torch.cat(dones).to(self.device)
+        old_log_probs = torch.cat(old_log_probs).unsqueeze(1).to(self.device)
+        masks = torch.cat(masks).to(self.device)
+
+        # invert action indices
+        offset = -self.action_space[0]          # ex : -(-5) = 5
+        actions = (actions + offset).to(self.device)  
+
+        return states, actions, rewards, next_states, dones, old_log_probs, advantages, masks
+
 
     def train(self, memory, advantage):
         '''
@@ -167,52 +227,51 @@ class PPOAgent:
           (1) value loss, (2) clipped surrogate loss, (3) entropy bonus
         - GAE로 계산된 advantage를 기반으로 policy와 value를 모두 학습한다.
         '''
-        # set memory
-        states, actions, rewards, next_states, dones, old_log_probs = zip(*memory)
+        if len(memory) < 16:
+            return
+        
+        losses = 0
 
-        # zip again to separate ts / agent
-        ts_states, ag_states = zip(*states)
-        n_ts_states, n_ag_states = zip(*next_states)
+        for _ in range(self.epoch):
+            # set memory
+            states, actions, rewards, next_states, dones, old_log_probs, advantages, masks = self.sample_memory(memory, advantage)
 
-        # cat across batch dimension
-        ts_states = torch.cat(ts_states, dim=0)
-        ag_states = torch.cat(ag_states, dim=0)
-        n_ts_states = torch.cat(n_ts_states, dim=0)
-        n_ag_states = torch.cat(n_ag_states, dim=0)
+            # get current values 
+            self.model.train()
+            current_logits, values = self.model(states)
 
-        states = (ts_states, ag_states)
-        next_states = (n_ts_states, n_ag_states)
+            if masks is not None:
+                # mask: shape [n_actions] with 1 (valid) or 0 (invalid)
+                current_logits = current_logits.masked_fill(masks == 0, float('-inf'))
 
-        actions = torch.cat(actions)
-        rewards = torch.cat(rewards)
-        dones = torch.cat(dones)
-        old_log_probs = torch.cat(old_log_probs).unsqueeze(1)
+            # entropy bonus 
+            action_dist = Categorical(logits=current_logits)                        
+            current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
+            current_probs = current_log_probs.exp()
 
-        # invert action indices
-        offset = -self.action_space[0]          # ex : -(-5) = 5
-        actions = actions + offset 
+            # 3 elements of loss : value_loss, clip_loss, entropy bonus 
+            with torch.no_grad():
+                _, next_values = self.model(next_states)
+                value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
-        # get current values 
-        self.model.train()
-        current_policy, values = self.model((ts_states, ag_states))
-        action_dist = Categorical(current_policy)                                # entropy bonus 
-        current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
-        current_probs = current_log_probs.exp()
+            value_loss = F.mse_loss(values.squeeze(), value_target.detach())
+            clip_loss = self.clip_loss_ftn(advantages, old_log_probs.exp(), current_probs)
+            entropy = action_dist.entropy().mean()
 
-        # 3 elements of loss : value_loss, clip_loss, entropy bonus 
-        with torch.no_grad():
-            _, next_values = self.model(next_states)
-            value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
+            total_loss = -clip_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy
 
-        value_loss = F.mse_loss(values.squeeze(), value_target.detach())
-        clip_loss = self.clip_loss_ftn(advantage, old_log_probs.exp(), current_probs)
-        entropy = action_dist.entropy().mean()
+            losses += total_loss.item()
 
-        total_loss = -clip_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy
+            # back-propagation 
+            self.optimizer.zero_grad()
+            total_loss.backward()
+            self.optimizer.step()
 
-        # back-propagation 
-        self.optimizer.zero_grad()
-        total_loss.backward()
-        self.optimizer.step()
+            return losses / self.epoch
+        
 
-        return total_loss.item()
+    def load_model(self, state_dict):
+        self.model.load_state_dict(state_dict)
+
+    def set_optimizer(self, new_optimizer):
+        self.optimizer = new_optimizer(self.model.parameters(), lr=self.lr)

@@ -88,4 +88,7 @@ class FuturesDataset(Dataset):
             result.append(group)
 
         return pd.concat(result)
+    
+    def reach_end(self, current_timestep):
+        return self.timesteps[-1] == current_timestep
         
