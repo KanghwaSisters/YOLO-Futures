@@ -95,7 +95,7 @@ class FuturesEnvironment:
         
         self.state = state_type
         self.state.get_dataset_indices(self.dataset.indices)
-        self.next_state = None
+        self.next_state = None 
 
         # 체결 계약 수, 현재 포지션 정보 
         self.current_position = 0     
@@ -130,29 +130,8 @@ class FuturesEnvironment:
         self.unrealized_pnl = 0
         self.current_timestep = date_range[0]
 
-        # Account info
-        self.initial_budget = start_budget  # 예산
-
-        self.available_balance = self.initial_budget # 가용잔고
-        self.margin_deposit = 0                 # 예치증거금
-
-        # 계약
-        self.open_interest_list = []            # 미결제약정 리스트
-        self.current_name_value = 0             # 보유 계약의 명목 가치
-        self.maintenance_margin = 0             # 보유 계약에 대한 유지증거금
-
-        # 포지션
-        self.position_dict = {-1 : 'short', 0 : 'hold', 1 : 'long'}
-        self.current_position = 0               # 현재 포지션. + / - 부호만
-        self.execution_strength = 0             # 체결 계약 수
-        self.position_cap = position_cap        # 최대 계약 수 상한
-
-        self.average_entry = 0                  # 평균 진입가 = 보유 계약 명목 가치 / 계약 수
-
-        # 손익 (계좌로 계산 가능한데 따로 있어도 괜찮을 듯)
-        self.realized_pnl = 0                   # 실현 손익
-        self.unrealized_pnl = 0                 # 미실현 손익
-        self.prev_unrealized_pnl = 0            # 직전 스텝의 미실현 손익
+        # 계좌
+        self.account = Account(start_budget, self.current_timestep, position_cap, self.current_timestep)
 
         # penalty 
         self.hold_over_penalty = -0.05
