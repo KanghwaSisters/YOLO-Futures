@@ -123,7 +123,7 @@ class FuturesEnvironment:
         # -[ type of info ]-------------------------------------
         # '' : done=False, 'margin_call' : 마진콜, 
         # 'end_of_data' : 마지막 데이터, 'bankrupt' : 도부, 
-        # 'maturity_data' : 만기일, 'max_contract' : 최대 계약수 도달 
+        # 'maturity_date' : 만기일, 'max_contract' : 최대 계약수 도달 
         # ------------------------------------------------------
         self.info = ''      
         self.mask = [1] *  self.n_actions      # shape [n_actions] with 1 (valid) or 0 (invalid)
