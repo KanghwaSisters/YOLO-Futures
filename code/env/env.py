@@ -5,6 +5,8 @@ from typing import Dict, List, Tuple, Optional, Any
 from datahandler.dataset import *
 from env.done_ftn import *
 from env.reward_ftn import *
+from account import *
+from maturity_ftn import *
 
 # 시장 상태 구분 Enum (강세장, 약세장, 횡보장)
 class MarketRegime(Enum):
@@ -95,7 +97,11 @@ class FuturesEnvironment:
         
         self.state = state_type
         self.state.get_dataset_indices(self.dataset.indices)
-        self.next_state = None 
+        self.next_state = None
+
+        # 포지션 제한
+        self.position_cap = position_cap   # 최대 계약 수 : 상한 
+        self.single_execution_cap = self.n_actions // 2
 
         # 체결 계약 수, 현재 포지션 정보 
         self.current_position = 0     
@@ -131,7 +137,20 @@ class FuturesEnvironment:
         self.current_timestep = date_range[0]
 
         # 계좌
-        self.account = Account(start_budget, self.current_timestep, position_cap, self.current_timestep)
+        self.account = Account(start_budget, position_cap, self.current_timestep)
+
+        # 현재 타임스텝 추적
+        self.current_timestep = date_range[0]
+        
+        # ===== 기존 코드 호환성을 위한 속성 추가 =====
+        # current info 
+        # -[ type of info ]-------------------------------------
+        # '' : done=False, 'margin_call' : 마진콜, 
+        # 'end_of_data' : 마지막 데이터, 'bankrupt' : 도부, 
+        # 'maturity_date' : 만기일, 'max_contract' : 최대 계약수 도달 
+        # ------------------------------------------------------
+        self.info = ''      
+        self.mask = [1] *  self.n_actions      # shape [n_actions] with 1 (valid) or 0 (invalid)
 
         # penalty 
         self.hold_over_penalty = -0.05
@@ -147,7 +166,7 @@ class FuturesEnvironment:
         
         # 리스크 계산용 객체
         self.risk_metrics = RiskMetrics(risk_lookback)
-        self.total_trades = 0
+        # self.total_trades = 0
         self.winning_trades = 0
         self.total_transaction_costs = 0
         
@@ -178,18 +197,18 @@ class FuturesEnvironment:
         remaining_strength = self.position_cap - self.execution_strength
 
         if self.info == 'max_contract':
-            if self.current_position == -1: # short 
+            if self.account.current_position == -1: # short 
                 mask = [0] * self.single_execution_cap + [1] * (self.single_execution_cap+1)
-            elif self.current_position == 1: # long 
+            elif self.account.current_position == 1: # long 
                 mask = [1] * (self.single_execution_cap+1) + [0] * self.single_execution_cap 
 
         elif (remaining_strength) < self.single_execution_cap:
             # 최대 체결 가능 계약수에 근접하여 일부 행동에 제약이 있다. 
             restricted_action = self.single_execution_cap - remaining_strength 
 
-            if self.current_position == -1: # short 
+            if self.account.current_position == -1: # short 
                 mask = [0] * restricted_action + [1] * (self.n_actions - restricted_action)
-            elif self.current_position == 1: # long 
+            elif self.account.current_position == 1: # long 
                 mask = [1] * (self.n_actions - restricted_action) + [0] * restricted_action
 
         else:
@@ -197,7 +216,6 @@ class FuturesEnvironment:
 
         return mask
     
-
     def _slice_by_date(self, full_df, date_range):
         full_df = full_df.copy()
         full_df.index = pd.to_datetime(full_df.index)
@@ -205,24 +223,6 @@ class FuturesEnvironment:
         
         start, end = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
         return full_df[(full_df.index >= start) & (full_df.index <= end)]
-    
-    def _calculate_transaction_cost(self, action: int) -> float:
-        """행동에 따른 거래 비용 계산"""
-        if action == 0:  # 거래 없으면 비용 0
-            return 0.0
-        
-        trade_value = abs(action) * self.previous_price * self.contract_unit
-        cost = trade_value * self.transaction_cost
-        return cost
-    
-    def _calculate_slippage(self, action: int) -> float:
-        """행동에 따른 슬리피지 비용 계산"""
-        if action == 0:
-            return 0.0
-        
-        market_impact = abs(action) * self.slippage_factor
-        slippage_cost = abs(action) * self.previous_price * self.contract_unit * market_impact
-        return slippage_cost
     
     def _update_market_regime(self, price_data: np.ndarray):
         """가격 데이터를 바탕으로 시장 상태(강세, 약세, 횡보) 및 변동성 상태 갱신"""
@@ -249,15 +249,11 @@ class FuturesEnvironment:
     
     def _check_margin_call(self) -> bool:
         """현재 증거금 부족 상태인지 확인"""
-        required_margin = abs(self.current_position) * self.execution_strength * \
-                         self.previous_price * self.contract_unit * self.margin_requirement
-        
-        available_funds = self.current_budget + self.unrealized_pnl
-        return available_funds < required_margin
+        return self.account.available_balance <= self.account.maintenance_margin
     
     def _check_risk_limits(self) -> bool:
         """최대 손실 한도, 최대 드로우다운 초과 여부 확인"""
-        total_return = (self.current_budget + self.unrealized_pnl) / self.init_budget - 1
+        total_return = (self.account.available_balance + self.account.unrealized_pnl) / self.account.initial_budget - 1
         if total_return < -self.max_drawdown_limit:
             return True
         
@@ -269,34 +265,21 @@ class FuturesEnvironment:
     
     def _force_liquidate_all_positions(self):
         """리스크 제한 초과 시 모든 포지션 강제 청산"""
-        if self.execution_strength == 0:
+        if self.account.execution_strength == 0:
             return
-        
-        execution = self.current_position * self.execution_strength
-        current_price = self.previous_price
-        
-        pnl = self._get_realized_pnl(current_price, execution, -execution)
-        transaction_cost = self._calculate_transaction_cost(-execution)
-        slippage = self._calculate_slippage(-execution)
-        
-        net_pnl = pnl - transaction_cost - slippage
-        self.current_budget += net_pnl
-        self.total_transaction_costs += transaction_cost + slippage
-        
-        # 포지션 초기화
-        self.current_position = 0
-        self.execution_strength = 0
-        self.average_entry = 0
-        self.unrealized_pnl = 0
-        
+
+        execution = self.account.execution_strength
+        net_pnl, cost = self.account.step(self.account.execution_strength, self.previous_price, self.current_timestep)
+
         # 거래 내역 기록
         self.trade_history.append({
-            'timestamp': self.current_timestep,
-            'action': -execution,
-            'price': current_price,
-            'pnl': net_pnl,
-            'type': 'forced_liquidation'
-        })
+                'timestamp': self.current_timestep,
+                'action': execution,
+                'price': self.previous_price,
+                'pnl': net_pnl,
+                'cost': cost,
+                'type': 'forced_liquidation'
+            })
     
     def _get_market_features(self) -> Dict[str, float]:
         """현재 시장 상태 관련 주요 지표 반환"""
@@ -306,9 +289,9 @@ class FuturesEnvironment:
             'sharpe_ratio': self.risk_metrics.get_sharpe_ratio(),
             'max_drawdown': self.risk_metrics.get_max_drawdown(),
             'volatility': self.risk_metrics.get_volatility(),
-            'win_rate': self.winning_trades / max(self.total_trades, 1),
-            'total_trades': self.total_trades,
-            'transaction_cost_ratio': self.total_transaction_costs / self.init_budget
+            'win_rate': self.winning_trades / max(self.account.total_trades, 1),
+            'total_trades': self.account.total_trades,
+            'transaction_cost_ratio': self.total_transaction_costs / self.account.initial_budget
         }
 
     def _is_dataset_reached_end(self, current_timestep):
@@ -317,19 +300,26 @@ class FuturesEnvironment:
         return done, info 
 
     def _is_near_margin_call(self):
-        done = False
+        # 현재 딱 마진콜 기준 (7%)
+        done = True if (self.account.available_balance <= self.account.maintenance_margin) else False
         info = 'margin_call' if done is True else ''
         return done, info
     
     def _is_maturity_date(self):
-        done = False 
-        info = 'maturity_data' if done is True else ''
+        done = True if (self.current_timestep.date() in self.maturity_list) else False
+        info = 'maturity_date' if done is True else ''
         return done, info
     
     def _is_bankrupt(self):
-        done = False 
+        done = True if (self.account.available_balance <= 0) else False
         info = 'bankrupt' if done is True else ''
-        return done , info
+        return done, info
+
+    def is_not_sufficient(self):
+        # 새로운 계약을 체결할 수 없는 경우의 조건
+        done = True if (self.account.available_balance <= self.previous_price * self.account.initial_margin_rate) else False
+        info = 'not_sufficient' if done is True else ''
+        return done, info
     
     def step(self, action: int):
         """
@@ -346,50 +336,23 @@ class FuturesEnvironment:
         next_fixed_state, close_price, next_timestep = next(self.data_iterator)
         current_price = close_price
 
-        # 1. 거래 비용과 슬리피지 계산
-        transaction_cost = self._calculate_transaction_cost(action)
-        slippage = self._calculate_slippage(action)
-        total_cost = transaction_cost + slippage
+        # 행동에 따른 계좌 업데이트
+        net_realized_pnl, cost = self.account.step(action, current_price, next_timestep)
 
-        # 이전 실행 계약 수
-        prev_execution = self.current_position * self.execution_strength
-        # 현재 액션 반영한 새로운 실행 계약 수
-        new_execution = prev_execution + action
+        if net_realized_pnl > 0:
+            self.winning_trades += 1
 
-        # 2. 실현 손익 계산 (청산된 포지션에 대해)
-        realized_pnl = self._get_realized_pnl(current_price, prev_execution, action)
-        # 총 거래 비용을 뺀 순실현 손익
-        net_realized_pnl = realized_pnl # - total_cost
-
-        # 3. 평균 진입가 갱신 (새로운 포지션 진입 혹은 청산 반영)
-        self._cal_ave_entry_price(current_price, prev_execution, new_execution, action)
-
-        # 4. 현재 포지션과 실행 강도 업데이트
-        self.current_position, self.execution_strength = self._get_current_position_strength(action)
-
-        # 5. 미실현 손익 계산 및 예산 업데이트
-        self.prev_unrealized_pnl = self.unrealized_pnl
-        self.unrealized_pnl = self._get_unrealized_pnl()
-        self.current_budget += net_realized_pnl # 계좌에 실제로 남아있는 돈
-        self.total_transaction_costs += total_cost # 지금까지 지출한 모든 거래 비용의 누적 합계
-
-        # 6. 거래 기록 업데이트 (액션이 있을 때만)
-        if action != 0:
-            self.total_trades += 1
-            if net_realized_pnl > 0:
-                self.winning_trades += 1
-
-            self.trade_history.append({
+        self.trade_history.append({
                 'timestamp': self.current_timestep,
                 'action': action,
                 'price': current_price,
                 'pnl': net_realized_pnl,
-                'cost': total_cost,
+                'cost': cost,
                 'type': 'regular'
             })
 
         # 7. 일일 수익률 계산 및 리스크 메트릭 업데이트
-        daily_return = net_realized_pnl / self.init_budget
+        daily_return = net_realized_pnl / self.account.initial_budget
         self.daily_returns.append(daily_return)
         self.risk_metrics.update(net_realized_pnl, daily_return)
 
@@ -404,16 +367,16 @@ class FuturesEnvironment:
         next_state = self.state(
             next_fixed_state,  # 실제 데이터 기반 상태
             current_position=self.current_position,
-            execution_strength=self.execution_strength,
+            execution_strength=self.account.execution_strength,
             **market_features
         )
 
         # 10. 보상 계산 (Sharpe ratio 기반 reward 함수 호출)
         reward = self.get_reward(
-            unrealized_pnl=self.unrealized_pnl,
-            prev_unrealized_pnl=self.prev_unrealized_pnl,
-            current_budget=self.current_budget,
-            transaction_cost=total_cost,
+            unrealized_pnl=self.account.unrealized_pnl,
+            prev_unrealized_pnl=self.account.prev_unrealized_pnl,
+            current_budget=self.account.available_balance,
+            transaction_cost=cost,
             risk_metrics=self.risk_metrics,  # Sharpe ratio를 위해 RiskMetrics 객체 전달
             market_regime=self.market_regime,
             daily_return=daily_return,
@@ -425,7 +388,7 @@ class FuturesEnvironment:
             current_timestep=self.current_timestep,
             next_timestep=next_timestep,
             max_strength=self.position_cap,
-            current_strength=self.execution_strength,
+            current_strength=self.account.execution_strength,
             margin_call=self._check_margin_call(),
             risk_limit_breach=self._check_risk_limits(),
             intraday_only=self.intraday_only
@@ -445,7 +408,6 @@ class FuturesEnvironment:
         done, self.info = self._is_bankrupt() 
         done, self.info = self._is_dataset_reached_end(self.current_timestep)
 
-
         # # 14. 종료되면 남은 포지션 강제 청산
         # if done and self.execution_strength > 0:
         #     self._force_liquidate_all_positions()
@@ -453,65 +415,6 @@ class FuturesEnvironment:
         # 16. 다음 상태, 보상, 종료 플래그 반환
         return next_state, reward, done
 
-    
-    def _get_realized_pnl(self, current_price: float, prev_execution: int, action: int) -> float:
-        """포지션 청산에 따른 실현 손익 계산"""
-        if self.previous_price is None:
-            return 0.0
-        
-        # 청산된 계약 수 (진입과 반대 방향 포지션 규모)
-        liquidation = min(abs(prev_execution), abs(action)) if self.sign(prev_execution) != self.sign(action) else 0
-        
-        realized_pnl = 0.0
-        if liquidation > 0:
-            price_diff = (current_price - self.average_entry) * self.sign(prev_execution)
-            realized_pnl = price_diff * liquidation * self.contract_unit
-        
-        return realized_pnl
-    
-    def _get_unrealized_pnl(self) -> float:
-        """현재 보유 포지션 기준 미실현 손익 계산"""
-        if self.previous_price is None or self.execution_strength == 0:
-            return 0.0
-        
-        direction = np.sign(self.current_position)
-        price_diff = (self.previous_price - self.average_entry) * direction
-
-        contracts = self.execution_strength
-        
-        unrealized_pnl = price_diff * direction * contracts * self.contract_unit
-        return unrealized_pnl
-    
-    def _cal_ave_entry_price(self, current_price: float, prev_execution: int, new_execution: int, action: int):
-        """포지션 진입 시 평균 진입가 계산 및 업데이터"""
-        remaining_execution = new_execution
-        
-        if remaining_execution != 0:
-            if self.sign(new_execution) == self.sign(action):
-                prev_value = self.average_entry * abs(prev_execution)
-                new_value = current_price * abs(action)
-                total_value = prev_value + new_value
-                total_contracts = abs(prev_execution + action)
-                self.average_entry = total_value / total_contracts
-        else:
-            self.average_entry = 0
-    
-    def get_current_position_strength(self, action: int) -> Tuple[int, int]:
-        """현재 포지션의 방향 및 크기 계산 (기존 코드 호환성)"""
-        return self._get_current_position_strength(action)
-    
-    def _get_current_position_strength(self, action: int) -> Tuple[int, int]:
-        """현재 포지션의 방향 및 크기 계산"""
-        previous_execution = self.current_position * self.execution_strength
-        current_execution = previous_execution + action
-        
-        if current_execution == 0:
-            return 0, 0
-        
-        execution_strength = abs(current_execution)
-        current_position = self.sign(current_execution)
-        
-        return current_position, execution_strength
     
     def get_performance_summary(self) -> Dict[str, Any]:
         """현재까지의 주요 성과 지표 요약 반환"""
