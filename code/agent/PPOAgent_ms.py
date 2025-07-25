@@ -88,10 +88,20 @@ class PPOAgent:
         state = tuple(s.to(self.device) for s in state)
         logits, _ = self.model(state)
 
+        # mask: shape [n_actions] with 1 (valid) or 0 (invalid)
         if mask is not None:
-            # mask: shape [n_actions] with 1 (valid) or 0 (invalid)
-            mask = torch.tensor(mask, dtype=torch.bool).to(self.device)
+            mask = torch.tensor(mask, dtype=torch.bool).unsqueeze(0).to(self.device)
             logits = logits.masked_fill(mask == 0, float('-inf'))
+
+            # try:
+            #     logits = logits.masked_fill(mask == 0, float('-inf'))
+            
+            # except RuntimeError as e:      
+            #     print(mask.shape)
+            #     print(logits.shape)
+            #     raise e
+        
+        
 
         # entropy bonus 
         action_dist = Categorical(logits=logits)
