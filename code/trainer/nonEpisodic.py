@@ -1,6 +1,6 @@
 import copy
 import torch
-from collections import deque
+from collections import deque  
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -133,7 +133,6 @@ class NonEpisodicTrainer:
         plt.savefig(path)
         print(f"✅ 시각화 저장 완료: {path}")
 
-
     def set_env(self, time_interval_train:tuple, time_interval_valid:tuple):
 
         train_env = self.env(full_df=self.df, 
@@ -171,12 +170,12 @@ class NonEpisodicTrainer:
         episode = 0
 
         maintained_steps = 0
+        memory = []
 
         state = env.reset()
 
         while not env.dataset.reach_end(env.current_timestep):
             # on-policy의 핵심 : 매 iter마다 메모리 초기화 
-            memory = []
             done = False 
 
             state = state if env.next_state is None else env.conti()
@@ -235,39 +234,43 @@ class NonEpisodicTrainer:
                 self.models_per_steps.append(agent.model.state_dict())
 
             self.latest_model = agent.model.state_dict()
-
-            # 지표 저장 
-            if env.info == 'the_poor':
-                self.durations.append(maintained_steps)
-                n_bankruptcy += 1
-                maintained_steps = 0
                 
             episode_rewards.append(ep_reward)
             moving_avg_rewards.append(ep_reward)
             episode_execution_strengths.append(ep_execution_strength)
 
-            advantage = agent.cal_advantage(memory)
-            loss = agent.train(memory, advantage) 
+            loss = None
+            if len(memory) >= agent.batch_size:
+                advantage = agent.cal_advantage(memory)
+                loss = agent.train(memory, advantage)
+                memory = []  # 학습 후에만 초기화
 
-            avg_reward = np.mean(moving_avg_rewards)
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
-            print(f"[{self.dataset_flag}|Train] Episode {episode} | Loss: {loss: .4f} | (short : {int(action_prop[-1])} %, hold : {int(action_prop[0])}%, long: {int(action_prop[1])}%) | (Ave) Strength: {np.mean(episode_execution_strengths):.2f} |Reward: {ep_reward:3.0f} | Avg({self.ma_interval}): {avg_reward: .2f} | Maintained Len: {maintained_steps}")
-
-            if (episode+1) % 50 == 0:
+            if loss != None:
+                print(f"[{self.dataset_flag}|Train] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Loss: {loss:6.3f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
+            
+            if (episode+1) % 200 == 0:
                 print(env)
+
+            # 지표 저장 
+            if env.info in ['bankrupt', 'margin_call', 'maturity_data', 'insufficient','risk_limits']:
+                self.durations.append(maintained_steps)
+                n_bankruptcy += 1
+                maintained_steps = 0
+                env.account.reset()
 
             episode += 1
 
         self.n_bankruptcys.append(n_bankruptcy)
 
-        print(f"\n== [Train 결과 요약: Interval {self.dataset_flag}] ==================")
+        print(f"\n== [Train 결과 요약: Interval {self.dataset_flag}] ==============================")
         print(f"  - 총 에피소드 수: {episode}")
         print(f"  - 최대 보상: {max_ep_reward:.2f}")
         print(f"  - 최종 평균 보상: {np.mean(episode_rewards):.2f}")
         print(f"  - 파산 횟수: {n_bankruptcy}")
         print(f"  - 파산 전 평균 유지 스텝 수: {np.mean(self.durations[-episode:])}")
-        print(f"  - 모델 저장 간격 (10): {len(self.models_per_steps)}")
+        print(f"  - 모델 저장 간격 (10)")
         print("============================================================\n")
 
     def valid(self, env, agent, model_name, state_dict):
@@ -284,6 +287,7 @@ class NonEpisodicTrainer:
         episode_execution_strengths = deque(maxlen=self.n_steps)
         maintained_steps = 0
         episode = 0
+        n_bankruptcy = 0
 
         state = env.reset()
 
@@ -321,16 +325,13 @@ class NonEpisodicTrainer:
                 ep_n_positions[current_position] += 1
                 ep_execution_strength += execution_strength
 
-                env_execution_strengths.append(env.execution_strength)
-                asset_history.append(env.current_budget - env.init_budget)
+                env_execution_strengths.append(env.account.execution_strength)
+                asset_history.append(env.account.realized_pnl)
                 actions.append(action)
 
             # update 
             maintained_steps += ep_len
 
-            if env.info == 'the_poor':
-                durations.append(maintained_steps)
-                maintained_steps = 0
 
             episode_rewards.append(ep_reward)
             moving_avg_rewards.append(ep_reward)
@@ -339,17 +340,23 @@ class NonEpisodicTrainer:
             avg_reward = np.mean(moving_avg_rewards)
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
-            print(f"[{self.dataset_flag}: {model_name} |Valid] Episode {episode} |(short : {int(action_prop[-1])} %, hold : {int(action_prop[0])}%, long: {int(action_prop[1])}%) | (Ave) Strength: {np.mean(episode_execution_strengths):.2f} |Reward: {ep_reward:3.0f} | Avg({self.ma_interval}): {avg_reward: .2f} | Maintained Steps: {maintained_steps}")
+            # 지표 저장 
+            if env.info in ['bankrupt', 'margin_call', 'maturity_data', 'insufficient','risk_limits']:
+                self.durations.append(maintained_steps)
+                n_bankruptcy += 1
+                maintained_steps = 0
+                env.account.reset()
+            print(f"[{self.dataset_flag}: {model_name} |Valid] Episode {episode+1} |(short : {int(action_prop[-1])} %, hold : {int(action_prop[0])}%, long: {int(action_prop[1])}%) | (Ave) Strength: {np.mean(episode_execution_strengths):.2f} |Reward: {ep_reward:3.0f} | Avg({self.ma_interval}): {avg_reward: .2f} | Maintained Steps: {maintained_steps}")
 
             if (episode+1) % 50 == 0:
                 print(env)
 
             episode += 1
 
-        print(f"\n== [Valid 결과 요약: Interval {self.dataset_flag}] ==================")
+        print(f"\n==[Valid 결과 요약:Interval{self.dataset_flag}] ==============================")
         print(f"  - 총 에피소드 수: {episode}")
         print(f"  - 평균 보상: {np.mean(episode_rewards):.2f}")
-        print(f"  - 평균 유지 시간: {np.mean(durations):.1f} step")
+        print(f"  - 평균 유지 시간: {np.mean(durations):.2f} step")
         print(f"  - 마지막 수익: {asset_history[-1]:.2f}")
         print("============================================================\n")
 
