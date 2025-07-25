@@ -250,11 +250,11 @@ class NonEpisodicTrainer:
             if loss != None:
                 print(f"[{self.dataset_flag}|Train] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Loss: {loss:6.3f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
             
-            if (episode+1) % 200 == 0:
+            if (episode+1) % 50 == 0:
                 print(env)
 
             # 지표 저장 
-            if env.info in ['bankrupt', 'margin_call', 'maturity_data', 'insufficient','risk_limits']:
+            if env.info in ['margin_call', 'maturity_data', 'bankrupt']:
                 self.durations.append(maintained_steps)
                 n_bankruptcy += 1
                 maintained_steps = 0
@@ -282,7 +282,7 @@ class NonEpisodicTrainer:
         env_execution_strengths = []
         episode_rewards = []
         actions = []
-        
+
         moving_avg_rewards = deque(maxlen=self.ma_interval)
         episode_execution_strengths = deque(maxlen=self.n_steps)
         maintained_steps = 0
@@ -292,24 +292,25 @@ class NonEpisodicTrainer:
         state = env.reset()
 
         while not env.dataset.reach_end(env.current_timestep):
-            done = False 
-
+            done = False
             state = state if env.next_state is None else env.conti()
 
             if type(state) == tuple:
                 ts_state = torch.tensor(state[0], dtype=torch.float32).unsqueeze(0).to(self.device)
                 agent_state = torch.tensor(state[1], dtype=torch.float32).unsqueeze(0).to(self.device)
-
                 state = (ts_state, agent_state)
-            
+
             ep_reward = 0
             ep_len = 0
-            ep_n_positions = np.array([0, 0, 0]) # 순서대로 0, 1, -1
+            ep_n_positions = np.array([0, 0, 0])  # hold, long, short
             ep_execution_strength = 0
 
-            while not done:
-                # step 
-                action, _ = agent.get_action(state)
+            for _ in range(self.n_steps):
+                if done:
+                    break
+                mask = env.mask
+
+                action, _ = agent.get_action(state, mask)
                 next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
 
@@ -318,7 +319,6 @@ class NonEpisodicTrainer:
                     agent_state = torch.tensor(next_state[1], dtype=torch.float32).unsqueeze(0).to(self.device)
                     next_state = (ts_state, agent_state)
 
-                # update step 지표 
                 state = next_state
                 ep_reward += reward
                 ep_len += 1
@@ -329,10 +329,8 @@ class NonEpisodicTrainer:
                 asset_history.append(env.account.realized_pnl)
                 actions.append(action)
 
-            # update 
+            # 에피소드 종료 후 기록
             maintained_steps += ep_len
-
-
             episode_rewards.append(ep_reward)
             moving_avg_rewards.append(ep_reward)
             episode_execution_strengths.append(ep_execution_strength)
@@ -340,20 +338,20 @@ class NonEpisodicTrainer:
             avg_reward = np.mean(moving_avg_rewards)
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
-            # 지표 저장 
-            if env.info in ['bankrupt', 'margin_call', 'maturity_data', 'insufficient','risk_limits']:
-                self.durations.append(maintained_steps)
+            if env.info in ['margin_call', 'maturity_data', 'bankrupt']:
+                durations.append(maintained_steps)
                 n_bankruptcy += 1
                 maintained_steps = 0
                 env.account.reset()
-            print(f"[{self.dataset_flag}: {model_name} |Valid] Episode {episode+1} |(short : {int(action_prop[-1])} %, hold : {int(action_prop[0])}%, long: {int(action_prop[1])}%) | (Ave) Strength: {np.mean(episode_execution_strengths):.2f} |Reward: {ep_reward:3.0f} | Avg({self.ma_interval}): {avg_reward: .2f} | Maintained Steps: {maintained_steps}")
+
+            print(f"[{self.dataset_flag}|Valid] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
 
             if (episode+1) % 50 == 0:
                 print(env)
 
             episode += 1
 
-        print(f"\n==[Valid 결과 요약:Interval{self.dataset_flag}] ==============================")
+        print(f"\n==[Valid2 결과 요약:Interval{self.dataset_flag}] ==============================")
         print(f"  - 총 에피소드 수: {episode}")
         print(f"  - 평균 보상: {np.mean(episode_rewards):.2f}")
         print(f"  - 평균 유지 시간: {np.mean(durations):.2f} step")

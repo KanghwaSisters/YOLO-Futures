@@ -349,6 +349,10 @@ class FuturesEnvironment:
             })
 
         # 7. 일일 수익률 계산 및 리스크 메트릭 업데이트
+        # ==================== 디버깅 필요
+        # (지민) 강제 청산 이후에 저장해야 할 것 같은데 이후 계산하는 거 좀 전체적으로 반영해야 할 듯 
+        # ===================================
+
         daily_return = net_realized_pnl / self.account.initial_budget
         self.daily_returns.append(daily_return)
         self.risk_metrics.update(net_realized_pnl, daily_return)
@@ -359,14 +363,16 @@ class FuturesEnvironment:
         # price_data = self.df['close'].iloc[start_idx:current_idx].values
         # self._update_market_regime(price_data)
 
+        # info를 확인하기 
         self._check_insufficient()
         self._check_near_margin_call()
 
-        if self.info == 'margin_call':
-            self._force_liquidate_all_positions()
-
-        # 
+        # done, info를 동시에 확인하기 
         done, self.info = self.switch_done_info(next_timestep, self.current_timestep)
+        
+        # info를 확인하고 강제 청산 옵션 실행 
+        if self.info in ['margin_call', 'maturity_data', 'bankrupt']:
+            self._force_liquidate_all_positions()
 
         # 9. 다음 상태 생성 (여기에 시장 정보 포함)
         # market_features = self._get_market_features()
