@@ -6,7 +6,7 @@ CONFIG = EasyDict({
     # 기본 설정
     'MAX_CONTRACT': 3,
     'DEVICE': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    'START_BUDGET': 20_000_000,
+    'START_BUDGET': 80_000_000,
     'WINDOW_SIZE': 30,
     'POSITION_CAP': 50,
     'TRAIN_VALID_TIMESTEP': None,  # 외부에서 정의해야 함
@@ -25,7 +25,7 @@ CONFIG = EasyDict({
 
     # 모델 설정
     'INPUT_DIM': None,  # 외부에서 target_values로부터 정의
-    'AGENT_INPUT_DIM': 10,
+    'AGENT_INPUT_DIM': 6,
     'EMBED_DIM': 32,
     'KERNEL_SIZE': 4,
     'STRIDE': 1,
