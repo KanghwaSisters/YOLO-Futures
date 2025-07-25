@@ -78,13 +78,17 @@ def reward_combined_pnl_sharpe(**kwargs):
     
     return float(combined_reward)
 
-def risk_adjusted_pnl_reward(hold_over_penalty=-0.05, 
-                             margin_call_penalty=-10.0, 
-                             maturity_date_penalty=-10.0,
-                             bankrupt_penalty=-10.0, 
-                             initial_budget=1_000_000, 
-                             env_info='',
-                             **kwargs):
+def risk_adjusted_pnl_reward(
+                            hold_over_penalty=-0.01, 
+                            margin_call_penalty=-1.0, 
+                            maturity_date_penalty=-0.5,
+                            bankrupt_penalty=-2.0, 
+                            insufficient_penalty=-0.5,
+                            risk_penalty=-1.0,
+                            initial_budget=1_000_000,
+                            env_info='',
+                            **kwargs
+                        ):
     
     # 1. 미실현 손익의 변화량 
     delta_unrealized_pnl = (kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']) 
@@ -96,8 +100,8 @@ def risk_adjusted_pnl_reward(hold_over_penalty=-0.05,
     reward = (delta_unrealized_pnl + realized_pnl) / initial_budget
 
     # 4. 장기 보유 시 패널티 부여
-    if kwargs['unrealized_pnl'] != 0:
-        reward += hold_over_penalty
+    # if kwargs['unrealized_pnl'] != 0:
+    #     reward += hold_over_penalty
 
     # 5. 마진콜일 때 패널티 부여 
     if env_info == 'margin_call':
@@ -108,8 +112,14 @@ def risk_adjusted_pnl_reward(hold_over_penalty=-0.05,
         reward += bankrupt_penalty
 
     # 7. 만기일일 때 패널티 부여 
-    elif env_info == 'maturity_date':
+    elif env_info == 'maturity_data':
         reward += maturity_date_penalty
+
+    elif env_info == 'insufficient':
+        reward += insufficient_penalty
+
+    elif env_info == 'risk_limits':
+        reward += risk_penalty
 
     return reward 
 
@@ -133,7 +143,7 @@ def pnl_change_based_reward(margin_call_penalty=-10.0,
         reward += bankrupt_penalty
 
     # 7. 만기일일 때 패널티 부여 
-    elif env_info == 'maturity_date':
+    elif env_info == 'maturity_data':
         reward += maturity_date_penalty
 
     return reward
