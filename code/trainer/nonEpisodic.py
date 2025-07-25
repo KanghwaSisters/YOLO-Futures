@@ -158,7 +158,9 @@ class NonEpisodicTrainer:
                                         position_cap=self.position_cap)
         
         return train_env, valid_env
-        
+    
+    def switch_state(self, env, state):
+        return state if env.next_state is None else env.conti()
 
     def train(self, env, agent):
         episode_rewards = []
@@ -178,7 +180,7 @@ class NonEpisodicTrainer:
             # on-policy의 핵심 : 매 iter마다 메모리 초기화 
             done = False 
 
-            state = state if env.next_state is None else env.conti()
+            state = self.switch_state(env, state)
 
             if type(state) == tuple:
                 ts_state = torch.tensor(state[0], dtype=torch.float32).unsqueeze(0).to(self.device)
@@ -293,7 +295,7 @@ class NonEpisodicTrainer:
 
         while not env.dataset.reach_end(env.current_timestep):
             done = False
-            state = state if env.next_state is None else env.conti()
+            state = self.switch_state(env, state)
 
             if type(state) == tuple:
                 ts_state = torch.tensor(state[0], dtype=torch.float32).unsqueeze(0).to(self.device)
