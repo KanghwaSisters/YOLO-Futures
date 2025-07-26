@@ -324,21 +324,24 @@ class FuturesEnvironment:
         1) 거래 비용 및 슬리피지 계산
         2) 포지션 및 평균 진입가 업데이트
         3) 실현 및 미실현 손익 계산
-        4) 보상, 종료 여부 계산
+        4) 계좌 상태 및 종료 조건 확인
         5) 강제 청산 처리 (필요시)
-        6) 상태 및 기록 업데이트 후 반환
+        6) 보상 계산 (모든 거래 완료 후)
+        7) 상태 및 기록 업데이트 후 반환
         """
 
-        # 다음 상태 데이터, 종가, 타임스텝 받아오기
+        # 1. 다음 상태 데이터, 종가, 타임스텝 받아오기
         next_fixed_state, close_price, next_timestep = next(self.data_iterator)
         current_price = close_price
 
-        # 행동에 따른 계좌 업데이트
+        # 2. 행동에 따른 계좌 업데이트
         net_realized_pnl, cost = self.account.step(action, current_price, next_timestep)
 
+        # 3. 승률 업데이트
         if net_realized_pnl > 0:
             self.winning_trades += 1
 
+        # 4. 거래 내역 기록
         self.trade_history.append({
                 'timestamp': self.current_timestep,
                 'action': action,
@@ -348,33 +351,44 @@ class FuturesEnvironment:
                 'type': 'regular'
             })
 
-        # 7. 일일 수익률 계산 및 리스크 메트릭 업데이트
-        # ==================== 디버깅 필요
-        # (지민) 강제 청산 이후에 저장해야 할 것 같은데 이후 계산하는 거 좀 전체적으로 반영해야 할 듯 
-        # ===================================
-
+        # 5. 일일 수익률 계산 및 리스크 메트릭 업데이트
         daily_return = net_realized_pnl / self.account.initial_budget
         self.daily_returns.append(daily_return)
         self.risk_metrics.update(net_realized_pnl, daily_return)
 
-        # 8. 시장 상태 업데이트 (필요시 주석 해제)
+        # 6. 시장 상태 업데이트 (필요시 주석 해제)
         # current_idx = self.df.index.get_loc(self.current_timestep)
         # start_idx = max(0, current_idx - self.window_size)
         # price_data = self.df['close'].iloc[start_idx:current_idx].values
         # self._update_market_regime(price_data)
 
-        # info를 확인하기 
+        # 7. 계좌 상태 확인 (info 설정)
         self._check_insufficient()
         self._check_near_margin_call()
 
-        # done, info를 동시에 확인하기 
+        # 8. 종료 조건 확인
         done, self.info = self.switch_done_info(next_timestep, self.current_timestep)
         
-        # info를 확인하고 강제 청산 옵션 실행 
+        # 9. 강제 청산 처리 (보상 계산 전에 실행)
         if self.info in ['margin_call', 'maturity_data', 'bankrupt']:
             self._force_liquidate_all_positions()
+            # 강제 청산 후 최종 수익률 재계산
+            final_return = self.account.realized_pnl / self.account.initial_budget
+            self.risk_metrics.update(self.account.realized_pnl, final_return)
 
-        # 9. 다음 상태 생성 (여기에 시장 정보 포함)
+        # 10. 보상 계산 (모든 거래 완료 후 실행)
+        reward = self.get_reward(
+            unrealized_pnl=self.account.unrealized_pnl,
+            prev_unrealized_pnl=self.account.prev_unrealized_pnl,
+            current_budget=self.account.available_balance,
+            transaction_cost=cost,
+            risk_metrics=self.risk_metrics,
+            market_regime=self.market_regime,
+            daily_return=daily_return,
+            net_realized_pnl=net_realized_pnl
+        )
+
+        # 11. 다음 상태 생성 (시장 정보 포함)
         # market_features = self._get_market_features()
         next_state = self.state(
             next_fixed_state,  # 실제 데이터 기반 상태
@@ -386,33 +400,15 @@ class FuturesEnvironment:
             total_transaction_costs=self.account.total_transaction_costs
         )
 
-        # 10. 보상 계산 
-        reward = self.get_reward(
-            unrealized_pnl=self.account.unrealized_pnl,
-            prev_unrealized_pnl=self.account.prev_unrealized_pnl,
-            current_budget=self.account.available_balance,
-            transaction_cost=cost,
-            risk_metrics=self.risk_metrics,  # Sharpe ratio를 위해 RiskMetrics 객체 전달
-            market_regime=self.market_regime,
-            daily_return=daily_return,
-            net_realized_pnl=net_realized_pnl
-        )
-
         # 12. action space에 대한 마스크 생성 
         self.mask = self.get_mask()
 
-        # 
+        # 13. 상태 업데이트
         self.next_state = next_state
         self.previous_price = current_price
         self.current_timestep = next_timestep
 
-        # 13. 선물 데이터에서 추가 done 상황 + update info 
-
-        # # 14. 종료되면 남은 포지션 강제 청산
-        # if done and self.execution_strength > 0:
-        #     self._force_liquidate_all_positions()
-
-        # 16. 다음 상태, 보상, 종료 플래그 반환
+        # 14. 다음 상태, 보상, 종료 플래그 반환
         return next_state, reward, done
     
     def switch_done_info(self, next_timestep, current_timestep):
