@@ -8,11 +8,12 @@ class Account:
                         slippage_factor):
         ########### fixed value ###########
         self.initial_budget = initial_budget    # 예산 (KRW)
-        self.position_dict = {-1 : 'short', 0 : 'hold', 1 : 'long'}
+        self.initial_timestep = initial_timestep # 초기 timestep 저장
+        self.position_dict = {-1: 'short', 0: 'hold', 1: 'long'}
         self.position_cap = position_cap        # 최대 계약 수 상한
         
         # 시장 정보 
-        self.contract_unit = 50000              # 거래 단위가 1포인트 당 5만원 (미니 선물)
+        self.contract_unit = 50_000             # 거래 단위가 1포인트 당 5만원 (미니 선물)
 
         # 증거금 비율
         self.initial_margin_rate = 0.105        # 예치증거금 10.5%
@@ -23,39 +24,13 @@ class Account:
         self.slippage_factor = slippage_factor
 
         ########### variable value ###########
-        self.current_timestep = initial_timestep # 현재 timestep (있어야 할까)
-
-        # 계좌 (KRW)
-        self.available_balance = self.initial_budget # 가용잔고
-        self.margin_deposit = 0                 # 예치증거금
-
-        # 포지션 (체결 계약)
-        self.open_interest_list = []            # 미결제약정 리스트
-        self.current_name_value = 0             # 보유 계약의 명목 가치 (pt)
-        self.maintenance_margin = 0             # 보유 계약에 대한 유지증거금 (KRW)
-
-        self.current_position = 0               # 현재 포지션. + / - 부호만
-        self.execution_strength = 0             # 체결 계약 수
-        self.total_trades = 0                   # 전체 거래 횟수
-
-        # 현재 포지션 관련 정보
-        self.average_entry = 0                  # 평균 진입가 = 보유 계약 명목 가치 / 계약 수 (pt)
-
-        # 손익 (계좌로 계산 가능한데 따로 있어도 괜찮을 듯)
-        self.realized_pnl = 0                   # 실현 손익 (KRW)
-        self.unrealized_pnl = 0                 # 미실현 손익 (KRW)
-        self.prev_unrealized_pnl = 0            # 직전 스텝의 미실현 손익 (KRW)
-        self.total_transaction_costs = 0        # 총 수수료
-
-        # 마진콜은 아예 안일어나게 하기 위해서 유지증거금보다 넉넉한 기준으로 기준 이상 손실이 나면 계약을 청산하도록 하자. 계약을 청산하고 나오면 마진콜 안받음
-
+        self.reset()
 
     def step(self, action, market_pt, next_timestep, get_history=True):
         '''
         action, market point에 따라 계좌, 포지션 업데이트
         새로운 계약 추가 / 계약 청산
         평균 진입가, 유지 증거금, 미실현 손익 업데이트
-        일단 단위가 너무 커지는 것 같아서 전부 포인트로 계산함
         '''
         # 직전 스텝 미실현 수익 저장
         self.prev_unrealized_pnl = self.unrealized_pnl
@@ -79,7 +54,7 @@ class Account:
             if (self.execution_strength == 0) or (position_diff > 0):
                 self._conclude_contract(size, position, market_pt)
 
-            # 계약 청산: 현재 포지과 반대 포지션을 취하는 경우
+            # 계약 청산: 현재 포지션과 반대 포지션을 취하는 경우
             elif position_diff < 0:
                 realized_net_pnl = self._settle_contract(size, position, market_pt)
         
@@ -91,7 +66,7 @@ class Account:
 
         if get_history:
             return realized_net_pnl, cost
-        
+
     def _conclude_contract(self, size, position, market_pt):
         '''
         새로운 계약 체결 함수
@@ -157,7 +132,6 @@ class Account:
         if get_pnl:
             return net_pnl
 
-    
     def settle_total_contract(self, market_pt, get_pnl=True):
         '''
         전체 계약 청산 함수
@@ -196,7 +170,7 @@ class Account:
         하루 장이 마감된 후 daily settlement 이루어짐 
         '''
         if self.execution_strength != 0:
-            daily_settle = self._get_pnl(close_pt, size = self.execution_strength) * self.contract_unit
+            daily_settle = self._get_pnl(close_pt, self.execution_strength) * self.contract_unit
             self.available_balance += daily_settle
 
             # 직전 스텝 미실현 수익 저장
@@ -207,66 +181,74 @@ class Account:
             self.unrealized_pnl = 0
 
     def update_account(self, market_pt):
+        '''
+        평균 진입가, 유지증거금, 미실현 손익 갱신
+        '''
         if self.execution_strength != 0:
-            # 평균 진입가 계산
-            self.average_entry = self.current_name_value / self.execution_strength
-            # 유지증거금 계산
-            self.maintenance_margin = self.current_name_value * self.maintenance_margin_rate * self.contract_unit
-            # 미실현 손익 계산
+            self.average_entry = np.mean(self.open_interest_list)  # 평균 진입가
+            self.maintenance_margin = sum(self.open_interest_list) * self.maintenance_margin_rate * self.contract_unit
             self.unrealized_pnl = self._get_pnl(market_pt, self.execution_strength) * self.contract_unit
+        else:
+            self.average_entry = 0
+            self.maintenance_margin = 0
+            self.unrealized_pnl = 0
 
     def _get_pnl(self, market_pt, size):
         '''
         손익 계산 함수
         내 계약 중 앞 size개의 계약에 대해 입력받은 market point에 따른 손익 계산
         '''
-        return sum(market_pt - self.open_interest_list[:size]) * self.current_position
+        entries = np.array(self.open_interest_list[:size])
+        return np.sum((market_pt - entries)) * self.current_position
 
     def _calculate_transaction_cost(self, action: int, market_pt) -> float:
-        """행동에 따른 거래 비용 계산"""
-        if action == 0:  # 거래 없으면 비용 0
-            return 0.0
-        
-        trade_value = abs(action) * market_pt * self.contract_unit
-        cost = trade_value * self.transaction_cost
-        return cost
-
-    def _calculate_slippage(self, action: int, market_pt) -> float:
-        """행동에 따른 슬리피지 비용 계산"""
+        '''
+        행동에 따른 거래 비용 계산
+        '''
         if action == 0:
             return 0.0
-        
-        market_impact = abs(action) * self.slippage_factor
-        slippage_cost = abs(action) * market_pt * self.contract_unit * market_impact
+        trade_value = abs(action) * market_pt * self.contract_unit
+        return trade_value * self.transaction_cost
+
+    def _calculate_slippage(self, action: int, market_pt) -> float:
+        '''
+        행동에 따른 슬리피지 비용 계산
+        '''
+        if action == 0:
+            return 0.0
+        slippage_cost = abs(action) * market_pt * self.contract_unit * self.slippage_factor
         return slippage_cost
 
-    def _get_cost(self, action:int, market_pt):
-        """행동에 따른 거래 비용 + 슬리피지 비용 계산"""
-        trade_cost = self._calculate_transaction_cost(action, market_pt)
-        slippage = self._calculate_slippage(action, market_pt)
-        return trade_cost + slippage
+    def _get_cost(self, action: int, market_pt) -> float:
+        '''
+        행동에 따른 거래 비용 + 슬리피지 비용 계산
+        '''
+        return self._calculate_transaction_cost(action, market_pt) + self._calculate_slippage(action, market_pt)
 
     def reset(self):
-        self.current_timestep = 0
+        '''
+        계좌 및 포지션 상태 초기화
+        '''
+        self.current_timestep = self.initial_timestep
 
-        # 계좌
+        # 계좌 (KRW)
         self.available_balance = self.initial_budget # 가용잔고
         self.margin_deposit = 0                 # 예치증거금
 
         # 포지션 (체결 계약)
         self.open_interest_list = []            # 미결제약정 리스트
-        self.current_name_value = 0             # 보유 계약의 명목 가치
-        self.maintenance_margin = 0             # 보유 계약에 대한 유지증거금
+        self.current_name_value = 0             # 보유 계약의 명목 가치 (pt)
+        self.maintenance_margin = 0             # 보유 계약에 대한 유지증거금 (KRW)
 
         self.current_position = 0               # 현재 포지션. + / - 부호만
         self.execution_strength = 0             # 체결 계약 수
         self.total_trades = 0                   # 전체 거래 횟수
 
         # 현재 포지션 관련 정보
-        self.average_entry = 0                  # 평균 진입가 = 보유 계약 명목 가치 / 계약 수
+        self.average_entry = 0                  # 평균 진입가 = 보유 계약 명목 가치 / 계약 수 (pt)
 
-        # 손익 (계좌로 계산 가능한데 따로 있어도 괜찮을 듯)
-        self.realized_pnl = 0                   # 실현 손익
-        self.unrealized_pnl = 0                 # 미실현 손익
-        self.prev_unrealized_pnl = 0            # 직전 스텝의 미실현 손익
-        self.total_transaction_costs = 0        # 총 수수료
+        # 손익
+        self.realized_pnl = 0                   # 실현 손익 (KRW)
+        self.unrealized_pnl = 0                 # 미실현 손익 (KRW)
+        self.prev_unrealized_pnl = 0            # 직전 스텝의 미실현 손익 (KRW)
+        self.total_transaction_costs = 0        # 총 수수료 (KRW)
