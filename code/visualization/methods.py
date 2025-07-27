@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 
 def apply_string_xticks(ax, timesteps, n_ticks=6):
     idxs = np.linspace(0, len(timesteps) - 1, n_ticks, dtype=int)
@@ -42,7 +43,7 @@ def plot_pnls(ax, timesteps, model_pnls_all, reset_point):
     ax.set_title('Pnl Over Time')
     ax.set_ylabel('Value')
     ax.set_xlabel('Date')
-    apply_string_xticks(ax, timesteps)  # ✅ 문자열 x축 적용
+    apply_string_xticks(ax, timesteps)
     ax.legend()
 
 def plot_volumes(ax, model_volumes_all):
@@ -68,3 +69,186 @@ def plot_durations(ax, model_durations_all):
     ax.set_ylabel('Cumulative Steps')
     ax.set_xlabel('Episodes')
     ax.legend()
+
+def plot_equity_curves(ax, timesteps, model_equities_all, reset_point, start_budget):
+    """자산 변화 곡선 - 실제 거래 성과를 가장 명확히 보여줌"""
+    for name, equity_series in model_equities_all.items():
+        # 수익률로 변환 (백분율)
+        returns = [(eq / start_budget - 1) * 100 for eq in equity_series]
+        ax.plot(range(len(returns)), returns, label=f'{name}', linewidth=2)
+    
+    ax.axhline(0, color='black', linestyle='-', alpha=0.3, label='Break-even')
+    ax.axvline(reset_point, linestyle='--', color='red', alpha=0.5, label='Reset Point')
+    ax.set_title('Portfolio Equity Curves (Total Return %)')
+    ax.set_ylabel('Return (%)')
+    ax.set_xlabel('Time Steps')
+    apply_string_xticks(ax, timesteps)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+
+def plot_position_tracking(ax, timesteps, actions, reset_point):
+    """포지션 상태 추적 - Long/Short/Hold 상태 변화"""
+    # 액션을 포지션으로 변환 (-1: Short, 0: Hold, 1: Long)
+    positions = np.sign(actions)
+    
+    # 색상 매핑
+    colors = ['blue' if p == -1 else 'gray' if p == 0 else 'red' for p in positions]
+    
+    # 포지션별로 영역 채우기
+    for i in range(len(positions)):
+        if positions[i] == 1:  # Long
+            ax.fill_between([i, i+1], 0, 1, color='red', alpha=0.3)
+        elif positions[i] == -1:  # Short  
+            ax.fill_between([i, i+1], -1, 0, color='blue', alpha=0.3)
+        # Hold은 0 라인 주변 (자동으로 비어있음)
+    
+    ax.axhline(0, color='black', linestyle='-', linewidth=1)
+    ax.axvline(reset_point, linestyle='--', color='black', alpha=0.5, label='Reset Point')
+    ax.set_title('Position Tracking Over Time')
+    ax.set_ylabel('Position (Red: Long, Blue: Short)')
+    ax.set_xlabel('Time Steps')
+    ax.set_ylim(-1.2, 1.2)
+    apply_string_xticks(ax, timesteps)
+    
+    # 범례 추가
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor='red', alpha=0.3, label='Long Position'),
+                      Patch(facecolor='gray', alpha=0.3, label='Hold'),
+                      Patch(facecolor='blue', alpha=0.3, label='Short Position')]
+    ax.legend(handles=legend_elements)
+
+def plot_drawdown_analysis(ax, timesteps, model_equities_all, reset_point, start_budget):
+    """드로우다운 분석 - 손실 구간과 회복 과정 시각화"""
+    for name, equity_series in model_equities_all.items():
+        # 누적 최대값 계산
+        running_max = np.maximum.accumulate(equity_series)
+        # 드로우다운 계산 (백분율)
+        drawdown = [(eq - peak) / peak * 100 for eq, peak in zip(equity_series, running_max)]
+        
+        ax.fill_between(range(len(drawdown)), drawdown, 0, 
+                       alpha=0.3, label=f'{name} Drawdown')
+        ax.plot(range(len(drawdown)), drawdown, label=f'{name}', linewidth=1.5)
+    
+    ax.axhline(0, color='black', linestyle='-', alpha=0.5)
+    ax.axvline(reset_point, linestyle='--', color='red', alpha=0.5, label='Reset Point')
+    ax.set_title('Drawdown Analysis (Risk Visualization)')
+    ax.set_ylabel('Drawdown (%)')
+    ax.set_xlabel('Time Steps')
+    apply_string_xticks(ax, timesteps)
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    
+    # 최대 드로우다운 표시
+    for name, equity_series in model_equities_all.items():
+        running_max = np.maximum.accumulate(equity_series)
+        drawdown = [(eq - peak) / peak * 100 for eq, peak in zip(equity_series, running_max)]
+        max_dd_idx = np.argmin(drawdown)
+        max_dd_val = min(drawdown)
+        ax.annotate(f'Max DD: {max_dd_val:.1f}%', 
+                   xy=(max_dd_idx, max_dd_val), 
+                   xytext=(10, 10), textcoords='offset points',
+                   bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                   arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+
+def plot_training_curves(ax, train_rewards, train_losses):
+    """학습 곡선 - 훈련 중 보상과 손실 변화"""
+    ax2 = ax.twinx()  # 두 번째 y축 생성
+    
+    # 보상 곡선 (왼쪽 y축)
+    episodes = range(len(train_rewards))
+    line1 = ax.plot(episodes, train_rewards, 'b-', alpha=0.3, label='Episode Rewards')
+    
+    # 이동평균으로 트렌드 표시
+    if len(train_rewards) > 10:
+        window = min(50, len(train_rewards) // 10)
+        moving_avg = np.convolve(train_rewards, np.ones(window)/window, mode='valid')
+        ax.plot(range(window-1, len(train_rewards)), moving_avg, 'b-', 
+               linewidth=2, label=f'Reward MA({window})')
+    
+    # 손실 곡선 (오른쪽 y축, None 값 제거)
+    valid_losses = [(i, loss) for i, loss in enumerate(train_losses) if loss is not None]
+    if valid_losses:
+        loss_episodes, loss_values = zip(*valid_losses)
+        line2 = ax2.plot(loss_episodes, loss_values, 'r-', alpha=0.6, label='Training Loss')
+        ax2.set_ylabel('Loss', color='r')
+        ax2.tick_params(axis='y', labelcolor='r')
+    
+    ax.set_xlabel('Episodes')
+    ax.set_ylabel('Reward', color='b')
+    ax.tick_params(axis='y', labelcolor='b')
+    ax.set_title('Training Progress: Rewards vs Loss')
+    
+    # 범례 합치기
+    lines1, labels1 = ax.get_legend_handles_labels()
+    if valid_losses:
+        lines2, labels2 = ax2.get_legend_handles_labels()
+        ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+    else:
+        ax.legend(loc='upper left')
+    
+    ax.grid(True, alpha=0.3)
+
+def plot_action_distribution_heatmap(ax, timesteps, actions, n_actions=21):
+    """액션 분포 히트맵 - 시간에 따른 액션 선택 패턴"""
+    # 액션을 시간 구간별로 그룹화
+    n_time_bins = min(50, len(actions) // 10)  # 최대 50개 구간
+    if n_time_bins < 5:
+        n_time_bins = min(10, len(actions))
+    
+    time_bins = np.array_split(range(len(actions)), n_time_bins)
+    
+    # 각 시간 구간별 액션 분포 계산
+    action_counts = np.zeros((n_time_bins, n_actions))
+    
+    for i, time_bin in enumerate(time_bins):
+        if len(time_bin) > 0:
+            bin_actions = [actions[j] for j in time_bin]
+            for action in bin_actions:
+                if 0 <= action < n_actions:  # 유효한 액션 범위 확인
+                    action_counts[i, action] += 1
+    
+    # 정규화 (각 시간 구간의 합이 1이 되도록)
+    row_sums = action_counts.sum(axis=1, keepdims=True)
+    row_sums[row_sums == 0] = 1  # 0으로 나누기 방지
+    action_probs = action_counts / row_sums
+    
+    # 히트맵 그리기
+    im = ax.imshow(action_probs.T, aspect='auto', cmap='YlOrRd', 
+                   interpolation='nearest', origin='lower')
+    
+    # 축 레이블 설정
+    ax.set_xlabel('Time Periods')
+    ax.set_ylabel('Action Index')
+    ax.set_title('Action Distribution Heatmap Over Time')
+    
+    # x축: 시간 구간별 대표 타임스탬프
+    if len(timesteps) > 0:
+        time_labels = []
+        for time_bin in time_bins[::max(1, len(time_bins)//6)]:  # 최대 6개 레이블
+            if len(time_bin) > 0:
+                mid_idx = time_bin[len(time_bin)//2]
+                if mid_idx < len(timesteps):
+                    time_labels.append(pd.to_datetime(timesteps[mid_idx]).strftime('%m-%d'))
+                else:
+                    time_labels.append('')
+        
+        tick_positions = np.linspace(0, len(time_bins)-1, len(time_labels))
+        ax.set_xticks(tick_positions)
+        ax.set_xticklabels(time_labels, rotation=45)
+    
+    # y축: 액션 인덱스 (중요한 액션들만 표시)
+    middle_action = n_actions // 2
+    mid = n_actions // 2
+    ax.set_yticks([0, mid, n_actions - 1])
+    ax.set_yticklabels(['Short(-)', 'Hold', 'Long(+)'])
+    
+    # 컬러바 추가
+    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
+    cbar.set_label('Action Probability', rotation=270, labelpad=20)
+    
+    # 중요한 액션 영역 표시 (hold 근처)
+    ax.axhline(middle_action-0.5, color='blue', linestyle='--', alpha=0.5, linewidth=1)
+    ax.axhline(middle_action+0.5, color='blue', linestyle='--', alpha=0.5, linewidth=1)
+    ax.text(len(time_bins)*0.02, middle_action, 'HOLD', 
+           bbox=dict(boxstyle='round,pad=0.2', facecolor='lightblue', alpha=0.7),
+           fontsize=8)
