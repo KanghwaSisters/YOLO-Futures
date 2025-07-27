@@ -278,12 +278,17 @@ class Account:
         return (
             f"===============================================\n"
             f"📁 1. Account Status (계좌 상태)\n"
+            f"⏱️  Current Timestep   : {self.current_timestep}\n"
             f"💰  Available Balance  : {self.available_balance:,.0f} KRW\n"
+            f"💼  Margin Deposit     : {self.margin_deposit:,.0f} KRW\n"
+            f"💸  Transaction Costs  : {self.total_transaction_costs:,.0f} KRW\n"
             f"📉  Unrealized PnL     : {self.unrealized_pnl:,.0f} KRW\n"
+            f"💵  Realized PnL       : {self.realized_pnl:,.0f} KRW\n"
             f"💰  Total Equity       : {total_equity:,.0f} KRW\n"
             f"⚖️  Avg Entry Price    : {self.average_entry:.2f}\n"
             f"💼  Current Position   : {self.position_dict[self.current_position]} ({self.current_position})\n"
             f"📊  Execution Strength : {self.execution_strength}/{self.position_cap}\n"
+            f"🔢  Total Trades       : {self.total_trades}\n"
             f"===============================================\n"
         )
 
