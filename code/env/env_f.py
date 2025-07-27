@@ -1,66 +1,13 @@
 import pandas as pd
 import numpy as np
-from enum import Enum
 from typing import Dict, List, Tuple, Optional, Any
+
 from datahandler.dataset import *
 from env.done_ftn import *
 from env.reward_ftn import *
 from env.account import *
 from env.maturity_ftn import *
-
-# 시장 상태 구분 Enum (강세장, 약세장, 횡보장)
-class MarketRegime(Enum):
-    BULL = 1
-    BEAR = -1
-    SIDEWAYS = 0
-
-# 리스크 관련 지표 계산 클래스
-class RiskMetrics:
-    def __init__(self, lookback_period: int = 20):
-        self.lookback_period = lookback_period
-        self.returns_history = []
-        self.pnl_history = []
-        
-    def update(self, pnl: float, returns: float):
-        # 최근 손익 및 수익률 기록 업데이트
-        self.pnl_history.append(pnl)
-        self.returns_history.append(returns)
-        
-        # lookback 기간 초과된 데이터 제거
-        if len(self.pnl_history) > self.lookback_period:
-            self.pnl_history.pop(0)
-            self.returns_history.pop(0)
-    
-    def get_sharpe_ratio(self) -> float:
-        # 샤프비율 계산 (평균수익/표준편차)
-        if len(self.returns_history) < 2:
-            return 0.0
-        returns = np.array(self.returns_history)
-        mean_return = np.mean(returns)
-        std_return = np.std(returns)
-        
-        # 표준편차가 0에 가까우면 0 반환 (division by zero 방지)
-        if std_return < 1e-8:
-            return 0.0
-        
-        sharpe = mean_return / std_return
-        # 극값 제한
-        return np.clip(sharpe, -10.0, 10.0)
-    
-    def get_max_drawdown(self) -> float:
-        # 최대 낙폭 계산 (최대 누적손실)
-        if len(self.pnl_history) < 2:
-            return 0.0
-        cumulative = np.cumsum(self.pnl_history)
-        peak = np.maximum.accumulate(cumulative)
-        drawdown = (cumulative - peak) / (peak + 1e-8)
-        return np.min(drawdown)
-    
-    def get_volatility(self) -> float:
-        # 수익률 변동성 계산 (표준편차)
-        if len(self.returns_history) < 2:
-            return 0.0
-        return np.std(self.returns_history)
+from env.market import *
 
 # 선물 트레이딩 환경 클래스
 class FuturesEnvironment:
@@ -144,7 +91,6 @@ class FuturesEnvironment:
         self.risk_metrics = RiskMetrics(risk_lookback)
         # self.total_trades = 0
         self.winning_trades = 0
-        self.total_transaction_costs = 0
         
         # 시장 상태 초기값
         self.market_features = {
@@ -168,49 +114,41 @@ class FuturesEnvironment:
         # 성과 추적용 리스트
         self.daily_returns = []
         self.trade_history = []
-        
+    
     def get_mask(self):
-        def restrict_actions_by_position():
-            if self.account.current_position == -1: # short 
-                mask = [0] * self.single_execution_cap + [1] * (self.single_execution_cap+1)
-            elif self.account.current_position == 1: # long 
-                mask = [1] * (self.single_execution_cap+1) + [0] * self.single_execution_cap 
-            else:
-                mask = [1] * self.n_actions  
-            return mask
-
-        # 가용 계약 수 
+        """
+        현재 계좌 상태 및 포지션에 따라 가능한 행동(action)에 대한 마스크를 반환합니다.
+        마스크는 1 (가능) / 0 (불가능)로 구성된 numpy array입니다.
+        """
+        position = self.account.current_position
         remaining_strength = self.position_cap - self.account.execution_strength
+        half = self.single_execution_cap
+        n = self.n_actions
 
-        if self.position_cap == remaining_strength:
-            # 최대 체결 가능 계약수에 도달했을 때 
-            mask = restrict_actions_by_position()
+        # 1. 기본 마스크 생성 (포지션 방향 기반)
+        mask = np.ones(n, dtype=np.int32)
 
-        elif self.info == 'insufficient':
-            # 자본금 부족으로 새로운 포지션을 체결할 수 없을 때 
-            mask = restrict_actions_by_position()
+        if position == -1:  # short
+            mask[:half] = 0
+        elif position == 1:  # long
+            mask[half + 1:] = 0
+        # hold일 경우 mask는 모두 1
 
-        elif (remaining_strength) < self.single_execution_cap:
-            # 최대 체결 가능 계약수에 근접하여 일부 행동에 제약이 있다. 
-            restricted_action = self.single_execution_cap - remaining_strength 
+        # 2. 계약 수 제한 적용
+        if remaining_strength < half:
+            restriction = half - remaining_strength
+            if position == -1:
+                mask[:restriction] = 0
+            elif position == 1:
+                mask[-restriction:] = 0
 
-            if self.account.current_position == -1: # short 
-                mask = [0] * restricted_action + [1] * (self.n_actions - restricted_action)
-            elif self.account.current_position == 1: # long 
-                mask = [1] * (self.n_actions - restricted_action) + [0] * restricted_action
+        # 3. 자본금 부족일 때는 포지션만 유지 가능
+        if self.info == 'insufficient':
+            # 추가 포지션 진입 불가하므로 hold만 가능
+            mask = np.zeros(n, dtype=np.int32)
+            mask[half] = 1  # hold 위치만 열어줌
 
-        else:
-            mask = [1] *  self.n_actions
-
-        if len(mask) != 9:  # 예: 3이 정상이라고 가정
-            print(f"❗️[Warning] n_actions changed: {mask}, current timestep: {self.current_timestep}, info: {self.info}")
-            print(remaining_strength)
-            print(self.position_cap)
-            print(self.single_execution_cap)
-            print(self.n_actions)
-            import traceback; traceback.print_stack()
-
-        return mask
+        return mask.tolist()
     
     def _slice_by_date(self, full_df, date_range):
         full_df = full_df.copy()
@@ -248,18 +186,11 @@ class FuturesEnvironment:
         if self.account.execution_strength == 0:
             return
 
+        # 현재 체결된 계약에서 반대 포지션을 취함 
         reversed_execution = -self.account.execution_strength * self.account.current_position
         net_pnl, cost = self.account.step(reversed_execution, self.previous_price, self.current_timestep)
 
-        # 거래 내역 기록
-        self.trade_history.append({
-                'timestamp': self.current_timestep,
-                'action': reversed_execution,
-                'price': self.previous_price,
-                'pnl': net_pnl,
-                'cost': cost,
-                'type': 'forced_liquidation'
-            })
+        return net_pnl, cost, reversed_execution
     
     def _get_market_features(self) -> Dict[str, float]:
         """현재 시장 상태 관련 주요 지표 반환"""
@@ -271,7 +202,7 @@ class FuturesEnvironment:
             'volatility': self.risk_metrics.get_volatility(),
             'win_rate': self.winning_trades / max(self.account.total_trades, 1),
             'total_trades': self.account.total_trades,
-            'transaction_cost_ratio': self.total_transaction_costs / self.account.initial_budget
+            'transaction_cost_ratio': self.account.total_transaction_costs / self.account.initial_budget
         }
 
     def _is_dataset_reached_end(self, current_timestep):
@@ -339,30 +270,6 @@ class FuturesEnvironment:
         if net_realized_pnl > 0:
             self.winning_trades += 1
 
-        self.trade_history.append({
-                'timestamp': self.current_timestep,
-                'action': action,
-                'price': current_price,
-                'pnl': net_realized_pnl,
-                'cost': cost,
-                'type': 'regular'
-            })
-
-        # 7. 일일 수익률 계산 및 리스크 메트릭 업데이트
-        # ==================== 디버깅 필요
-        # (지민) 강제 청산 이후에 저장해야 할 것 같은데 이후 계산하는 거 좀 전체적으로 반영해야 할 듯 
-        # ===================================
-
-        daily_return = net_realized_pnl / self.account.initial_budget
-        self.daily_returns.append(daily_return)
-        self.risk_metrics.update(net_realized_pnl, daily_return)
-
-        # 8. 시장 상태 업데이트 (필요시 주석 해제)
-        # current_idx = self.df.index.get_loc(self.current_timestep)
-        # start_idx = max(0, current_idx - self.window_size)
-        # price_data = self.df['close'].iloc[start_idx:current_idx].values
-        # self._update_market_regime(price_data)
-
         # info를 확인하기 
         self._check_insufficient()
         self._check_near_margin_call()
@@ -372,7 +279,37 @@ class FuturesEnvironment:
         
         # info를 확인하고 강제 청산 옵션 실행 
         if self.info in ['margin_call', 'maturity_data', 'bankrupt']:
-            self._force_liquidate_all_positions()
+            net_pnl, cost, reversed_execution = self._force_liquidate_all_positions()
+
+            # 일일 수익률 계산 및 리스크 메트릭 업데이트
+            daily_return = (net_pnl + self.account.unrealized_pnl) / self.account.initial_budget
+            self.daily_returns.append(daily_return)
+            self.risk_metrics.update(net_pnl, daily_return)
+
+            # 거래 내역 기록
+            self.trade_history.append({
+                    'timestamp': self.current_timestep,
+                    'action': reversed_execution,
+                    'price': self.previous_price,
+                    'pnl': net_pnl,
+                    'cost': cost,
+                    'type': 'forced_liquidation'
+                })
+        else:
+            # 7. 일일 수익률 계산 및 리스크 메트릭 업데이트
+            daily_return = (net_realized_pnl + self.account.unrealized_pnl) / self.account.initial_budget
+            self.daily_returns.append(daily_return)
+            self.risk_metrics.update(net_realized_pnl, daily_return)
+
+            # 거래 내역 기록  
+            self.trade_history.append({
+                    'timestamp': self.current_timestep,
+                    'action': action,
+                    'price': current_price,
+                    'pnl': net_realized_pnl,
+                    'cost': cost,
+                    'type': 'regular'
+                })
 
         # 9. 다음 상태 생성 (여기에 시장 정보 포함)
         # market_features = self._get_market_features()
@@ -380,10 +317,10 @@ class FuturesEnvironment:
             next_fixed_state,  # 실제 데이터 기반 상태
             current_position=self.account.current_position,
             execution_strength=self.account.execution_strength,
-            realized_pnl=self.account.realized_pnl,
-            unrealized_pnl=self.account.unrealized_pnl,
-            maintenance_margin=self.account.maintenance_margin,
-            total_transaction_costs=self.account.total_transaction_costs
+            realized_pnl=self.account.realized_pnl / self.account.initial_margin_rate,
+            unrealized_pnl=(self.account.unrealized_pnl - self.account.prev_unrealized_pnl) / self.account.initial_margin_rate,
+            maintenance_margin=self.account.maintenance_margin / self.account.initial_margin_rate,
+            total_transaction_costs=self.account.total_transaction_costs / self.account.initial_margin_rate
         )
 
         # 10. 보상 계산 
@@ -401,16 +338,11 @@ class FuturesEnvironment:
         # 12. action space에 대한 마스크 생성 
         self.mask = self.get_mask()
 
-        # 
+        # 업데이트 
         self.next_state = next_state
         self.previous_price = current_price
         self.current_timestep = next_timestep
 
-        # 13. 선물 데이터에서 추가 done 상황 + update info 
-
-        # # 14. 종료되면 남은 포지션 강제 청산
-        # if done and self.execution_strength > 0:
-        #     self._force_liquidate_all_positions()
 
         # 16. 다음 상태, 보상, 종료 플래그 반환
         return next_state, reward, done
@@ -458,8 +390,8 @@ class FuturesEnvironment:
             'win_rate': self.winning_trades / max(self.account.total_trades, 1),
             'sharpe_ratio': self.risk_metrics.get_sharpe_ratio(),
             'max_drawdown': self.risk_metrics.get_max_drawdown(),
-            'total_transaction_costs': self.total_transaction_costs,
-            'cost_ratio': self.total_transaction_costs / self.account.initial_budget,
+            'total_transaction_costs': self.account.total_transaction_costs,
+            'cost_ratio': self.account.total_transaction_costs / self.account.initial_budget,
             'market_regime': self.market_regime.value,
             'volatility_regime': self.volatility_regime,
             'current_budget': self.account.available_balance,
@@ -469,7 +401,6 @@ class FuturesEnvironment:
     def reset(self):
         """환경 초기화 및 상태 리셋"""
         self.account.reset()
-        self.total_transaction_costs = 0
 
         # info 상태 초기화
         self.info = ''
@@ -491,14 +422,14 @@ class FuturesEnvironment:
         self.current_timestep = timestep
         
         return self.state(
-                fixed_state,  # 실제 데이터 기반 상태
-                current_position=self.account.current_position,
-                execution_strength=self.account.execution_strength,
-                realized_pnl=self.account.realized_pnl,
-                unrealized_pnl=self.account.unrealized_pnl,
-                maintenance_margin=self.account.maintenance_margin,
-                total_transaction_costs=self.account.total_transaction_costs
-            )
+            fixed_state,  # 실제 데이터 기반 상태
+            current_position=self.account.current_position,
+            execution_strength=self.account.execution_strength,
+            realized_pnl=self.account.realized_pnl / self.account.initial_margin_rate,
+            unrealized_pnl=(self.account.unrealized_pnl - self.account.prev_unrealized_pnl) / self.account.initial_margin_rate,
+            maintenance_margin=self.account.maintenance_margin / self.account.initial_margin_rate,
+            total_transaction_costs=self.account.total_transaction_costs / self.account.initial_margin_rate
+        )
     
     def conti(self):
         """done 후에도 다음 상태를 반환 (연속 거래용)"""
