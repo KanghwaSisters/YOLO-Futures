@@ -121,7 +121,7 @@ class FuturesEnvironment:
         # -[ type of info ]-------------------------------------
         # '' : done=False, 'margin_call' : 마진콜, 
         # 'end_of_data' : 마지막 데이터, 'bankrupt' : 도부, 
-        # 'maturity_date' : 만기일, 'max_contract' : 최대 계약수 도달 
+        # 'maturity_data' : 만기일, 'max_contract' : 최대 계약수 도달 
         # ------------------------------------------------------
         self.info = ''      
         self.mask = [1] *  self.n_actions      # shape [n_actions] with 1 (valid) or 0 (invalid)
@@ -320,7 +320,7 @@ class FuturesEnvironment:
     
     def _is_maturity_date(self):
         done = False 
-        info = 'maturity_date' if done is True else ''
+        info = 'maturity_data' if done is True else ''
         return done, info
     
     def _is_bankrupt(self):
@@ -356,7 +356,7 @@ class FuturesEnvironment:
         # 2. 실현 손익 계산 (청산된 포지션에 대해)
         realized_pnl = self._get_realized_pnl(current_price, prev_execution, action)
         # 총 거래 비용을 뺀 순실현 손익
-        net_realized_pnl = realized_pnl - total_cost
+        net_realized_pnl = realized_pnl # - total_cost
 
         # 3. 평균 진입가 갱신 (새로운 포지션 진입 혹은 청산 반영)
         self._cal_ave_entry_price(current_price, prev_execution, new_execution, action)
