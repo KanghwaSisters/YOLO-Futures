@@ -2,19 +2,21 @@ from easydict import EasyDict
 import torch
 import torch.optim as optim
 
+position_cap = 10
+
 CONFIG = EasyDict({
     # 기본 설정
     'MAX_CONTRACT': 3,
     'DEVICE': torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    'START_BUDGET': 80_000_000,
+    'START_BUDGET': 30_000_000,
     'WINDOW_SIZE': 30,
-    'POSITION_CAP': 50,
+    'POSITION_CAP': position_cap,
     'TRAIN_VALID_TIMESTEP': None,  # 외부에서 정의해야 함
 
     # PPO Agent 설정
-    'SINGLE_EXECUTION_CAP' : 4,
-    'N_ACTIONS': 9,
-    'ACTION_SPACE': list(range(-4, 5)),
+    'SINGLE_EXECUTION_CAP' : position_cap,
+    'N_ACTIONS': 1+2*position_cap,
+    'ACTION_SPACE': list(range(-position_cap, position_cap+1)),
     'GAMMA': 0.99,
     'LR': 1e-3,
     'VALUE_COEFF': 0.5,
@@ -46,5 +48,5 @@ CONFIG = EasyDict({
     'REWARD_FTN': None,  # 외부에서 정의
     'DONE_FTN': None,    # 외부에서 정의
     'SCALER': None,      # 외부에서 정의
-    'PATH': '/Users/ijimin/Documents/GitHub/YOLO-Futures/logs',
+    'PATH': '/Users/ijimin/Documents/GitHub/YOLO-Futures/logs/test2',
 })
