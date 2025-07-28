@@ -56,6 +56,10 @@ class NonEpisodicTrainer:
         self.durations = []
         self.n_bankruptcys = []
         self.train_iter_rewards_all = []
+        
+        # 학습 추적용 변수 추가
+        self.train_rewards_history = []
+        self.train_losses_history = []
 
         self.path = path
         self.v_path = path + "/" + "visualization"
@@ -84,9 +88,6 @@ class NonEpisodicTrainer:
         print(f"✅ 시각화 저장 완료: {path}")
         plt.show()
 
-    
-
-    
     def __call__(self):
         for idx, (train_interval, valid_interval) in enumerate(self.train_valid_timestep):
             print(f"== [{idx}] interval training ===========================")
@@ -114,17 +115,27 @@ class NonEpisodicTrainer:
 
             for key, model in models.items():
                 rewards, strengths, assets, r_pnls, actions = self.valid(self.valid_env, self.valid_agent, key, model)
+            model_equities_all = {}  # 새로 추가: 자산 변화 추적
+
+            for key, model in models.items():
+                rewards, strengths, assets, durations, actions, equities = self.valid(self.valid_env, self.valid_agent, key, model)
                 model_rewards_all[key] = rewards
                 model_volumes_all[key] = strengths
                 model_pnls_all[key] = assets
                 model_r_pnls_all[key] = r_pnls
                 model_actions_all[key] = actions
+                model_equities_all[key] = equities  # 새로 추가
 
             valid_data['model_rewards_all'] = model_rewards_all
             valid_data['model_volumes_all'] = model_volumes_all
             valid_data['model_pnls_all'] = model_pnls_all
             valid_data['model_r_pnls_all'] = model_r_pnls_all
             valid_data['model_actions_all'] = model_actions_all
+            valid_data['model_equities_all'] = model_equities_all  # 새로 추가
+            
+            # 학습 데이터 추가
+            valid_data['train_rewards'] = self.train_rewards_history
+            valid_data['train_losses'] = self.train_losses_history
 
             self.plot_all_validation_graphs(valid_data, self.v_path)
             self.save_model_to(self.m_path)
@@ -140,8 +151,13 @@ class NonEpisodicTrainer:
         model_volumes_all = valid_data['model_volumes_all']
         model_r_pnls_all = valid_data['model_r_pnls_all']
         model_pnls_all = valid_data['model_pnls_all']
+        model_equities_all = valid_data['model_equities_all']  # 새로 추가
+        train_rewards = valid_data['train_rewards']
+        train_losses = valid_data['train_losses']
         reset_point = 50
 
+        fig, axs = plt.subplots(12, 1, figsize=(18, 36))
+        fig.suptitle("Enhanced Validation Visualization", fontsize=18)
 
         fig, axs = plt.subplots(9, 1, figsize=(18, 21))
         fig.suptitle("Validation Visualization", fontsize=18)
@@ -155,14 +171,32 @@ class NonEpisodicTrainer:
         for idx, (name, pnls) in enumerate(model_pnls_all.items()):
             plot_both_pnl_ticks(axs[6+idx], list(range(len(pnls))), pnls)
 
-        # axs[3, 1].axis('off')
+        # 7. 자산 변화 곡선
+        plot_equity_curves(axs[7], timesteps, model_equities_all, reset_point, self.start_budget)
+        
+        # 8. 포지션 추적 (대표 모델 1개만 - latest model)
+        latest_actions = model_actions_all['latest model']
+        plot_position_tracking(axs[8], timesteps, latest_actions, reset_point)
+        
+        # 9. 드로우다운 분석 (리스크 시각화)
+        plot_drawdown_analysis(axs[9], timesteps, model_equities_all, reset_point, self.start_budget)
+        
+        # 10. 학습 곡선 (보상 & 손실)
+        plot_training_curves(axs[10], train_rewards, train_losses)
+        
+        # 11. 액션 분포 히트맵 (대표 모델의 액션 패턴)
+        latest_actions = model_actions_all['latest model']
+        plot_action_distribution_heatmap(axs[11], timesteps, latest_actions, self.agent.n_actions)
 
         for ax in axs.flatten():
             ax.tick_params(axis='x', rotation=45)
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(path)
-        print(f"✅ 시각화 저장 완료: {path}")
+        print(f"✅ 강화된 시각화 저장 완료 (학습 상태 포함): {path}")
+        
+        # 메모리 정리
+        plt.close(fig)
 
     def set_env(self, time_interval_train:tuple, time_interval_valid:tuple):
 
@@ -205,6 +239,10 @@ class NonEpisodicTrainer:
         maintained_steps = 0
         self.memory = []
         self.durations = []
+
+        # 학습 추적 초기화
+        interval_rewards = []
+        interval_losses = []
 
         state = env.reset()
 
@@ -275,7 +313,8 @@ class NonEpisodicTrainer:
             episode_rewards.append(ep_reward)
             moving_avg_rewards.append(ep_reward)
             episode_execution_strengths.append(ep_execution_strength)
-
+            
+            # 학습 추적 데이터 기록
             loss = None
             if len(self.memory) >= agent.batch_size:
                 advantage = agent.cal_advantage(self.memory)
@@ -314,6 +353,10 @@ class NonEpisodicTrainer:
 
 
         self.n_bankruptcys.append(n_bankruptcy)
+        
+        # 인터벌별 학습 데이터 저장
+        self.train_rewards_history.extend(interval_rewards)
+        self.train_losses_history.extend(interval_losses)
 
         print(f"\n== [Train 결과 요약: Interval {self.dataset_flag}] ==============================")
         print(f"  - 총 에피소드 수: {episode}")
@@ -333,6 +376,7 @@ class NonEpisodicTrainer:
         env_execution_strengths = []
         episode_rewards = []
         actions = []
+        equity_history = []  # 새로 추가: 총 자산 추적
 
         moving_avg_rewards = deque(maxlen=self.ma_interval)
         episode_execution_strengths = deque(maxlen=self.n_steps)
@@ -381,6 +425,10 @@ class NonEpisodicTrainer:
                 env_execution_strengths.append(env.account.execution_strength)
                 asset_history.append(env.account.realized_pnl)
                 actions.append(action)
+                
+                # 새로 추가: 총 자산 (available_balance + unrealized_pnl) 기록
+                current_equity = env.account.available_balance + env.account.unrealized_pnl
+                equity_history.append(max(current_equity, 1.0))  # 음수 방지
 
             # 에피소드 종료 후 기록
             maintained_steps += ep_len
@@ -408,9 +456,10 @@ class NonEpisodicTrainer:
         print(f"  - 총 에피소드 수: {episode}")
         print(f"  - 평균 보상: {np.mean(episode_rewards):.2f}")
         print(f"  - 마지막 수익: {asset_history[-1]:.2f}")
+        print(f"  - 최종 총 자산: {equity_history[-1]:.2f}")  # 새로 추가
         print("============================================================\n")
 
-        return episode_rewards, env_execution_strengths, pnls, asset_history, actions
+        return episode_rewards, env_execution_strengths, pnls, asset_history, actions,equity_history
 
     def save_model_to(self, path):
         # 가장 최근 모델 저장
