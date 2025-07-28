@@ -191,10 +191,10 @@ class PPOAgent:
     
     def sample_memory(self, memory, advantage):
         # actual batch size
-        actual_batch_size = self.get_max_power2_batch_size(len(memory))
+        # actual_batch_size = self.get_max_power2_batch_size(len(memory))
 
         # sampling from raw data 
-        indices = random.sample(range(len(memory)), actual_batch_size)
+        indices = random.sample(range(len(memory)), self.batch_size)
         sampled_memory = [memory[i] for i in indices]
 
         states, actions, rewards, next_states, dones, old_log_probs, masks = zip(*sampled_memory)
