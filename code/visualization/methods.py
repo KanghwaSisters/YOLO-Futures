@@ -92,14 +92,14 @@ def plot_both_pnl_ticks(ax, timesteps, pnls):
     unrealized_pnl, realized_pnl = zip(*pnls)
     width = 0.4  # 막대 폭
 
-    # 양수면 빨강, 음수면 파랑
-    unrealized_colors = ['red' if v >= 0 else 'blue' for v in realized_pnl]
-    realized_colors   = ['lightcoral' if v >= 0 else 'lightblue' for v in unrealized_pnl]
+    # 색상: Realized는 진하게, Unrealized는 연하게
+    unrealized_colors = ['lightcoral' if v >= 0 else 'lightblue' for v in unrealized_pnl]
+    realized_colors   = ['red' if v >= 0 else 'blue' for v in realized_pnl]
 
-    # 막대 위치 조정 (좌우로 나란히)
+    # 막대 위치 조정
     x = list(range(len(timesteps)))
-    x1 = [i - width/2 for i in x]
-    x2 = [i + width/2 for i in x]
+    x1 = [i - width/2 for i in x]  # Unrealized
+    x2 = [i + width/2 for i in x]  # Realized
 
     # 막대그래프 그리기
     ax.bar(x1, unrealized_pnl, width=width, color=unrealized_colors, label='Unrealized PnL')
