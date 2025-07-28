@@ -15,7 +15,7 @@ class EpisodicTrainer(NonEpisodicTrainer):
                  agent, model, optimizer, device,  # agent 관련 파라미터 
                  n_steps, ma_interval, save_interval,
                  path,
-                 max_iter_same_interval=100
+                 max_iter_same_interval=1000
                  ):
         
         super().__init__(df, env, train_valid_timestep, window_size, state, reward_ftn, done_ftn, start_budget, scaler, position_cap, # env 관련 파라미터 
