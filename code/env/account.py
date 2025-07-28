@@ -7,7 +7,7 @@ class Account:
                         transaction_cost,
                         slippage_factor):
         ########### fixed value ###########
-        self.initial_budget = initial_budget    # 예산 (KRW)
+        self.initial_budget = initial_budget     # 예산 (KRW)
         self.initial_timestep = initial_timestep # 초기 timestep 저장
         self.position_dict = {-1: 'short', 0: 'hold', 1: 'long'}
         self.position_cap = position_cap        # 최대 계약 수 상한
@@ -32,6 +32,9 @@ class Account:
         새로운 계약 추가 / 계약 청산
         평균 진입가, 유지 증거금, 미실현 손익 업데이트
         '''
+        # 이전 포지션 정보 저장 
+        self.prev_position = self.current_position
+
         # 직전 스텝 미실현 수익 저장
         self.prev_unrealized_pnl = self.unrealized_pnl
         if self.execution_strength != 0:
@@ -100,7 +103,7 @@ class Account:
             remain_size = size - self.execution_strength
 
             # 전체 계약 청산
-            net_pnl = self.settle_total_contract(market_pt)
+            net_pnl, _ = self.settle_total_contract(market_pt)
 
             if remain_size > 0:
                 # 남은 포지션에 대해 새로운 계약 체결
@@ -140,6 +143,7 @@ class Account:
         # 손익, 수수료, 슬리피지
         pnl = self._get_pnl(market_pt, self.execution_strength) * self.contract_unit
         cost = self._get_cost(self.execution_strength, market_pt)
+
         # 순손익
         net_pnl = pnl - cost
         
@@ -155,15 +159,18 @@ class Account:
         self.realized_pnl += net_pnl
 
         # 계좌 변동
-        self.available_balance += self.margin_deposit + net_pnl
-        self.margin_deposit = 0
+        self.return_margin_deposit(net_pnl)
         self.total_transaction_costs += cost
 
         # 정보 업데이트
         self.update_account(market_pt)
 
         if get_pnl:
-            return net_pnl
+            return net_pnl, cost
+        
+    def return_margin_deposit(self, net_pnl):
+        self.available_balance += self.margin_deposit + net_pnl
+        self.margin_deposit = 0
 
     def daily_settlement(self, close_pt):
         '''
@@ -223,7 +230,8 @@ class Account:
         '''
         행동에 따른 거래 비용 + 슬리피지 비용 계산
         '''
-        return self._calculate_transaction_cost(action, market_pt) + self._calculate_slippage(action, market_pt)
+        cost = self._calculate_transaction_cost(action, market_pt) + self._calculate_slippage(action, market_pt)
+        return cost
 
     def reset(self):
         '''
@@ -241,6 +249,7 @@ class Account:
         self.maintenance_margin = 0             # 보유 계약에 대한 유지증거금 (KRW)
 
         self.current_position = 0               # 현재 포지션. + / - 부호만
+        self.prev_position = 0                  # 이전 포지션, 표기 방식은 위와 동일 
         self.execution_strength = 0             # 체결 계약 수
         self.total_trades = 0                   # 전체 거래 횟수
 
