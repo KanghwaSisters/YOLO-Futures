@@ -38,7 +38,7 @@ class DLinearModel(nn.Module):
 
 
     def forward(self, x):
-        x = x.transpose(1,2)
+        x = x.transpose(1,2)    # (batch_size, channel_size, seq_len)
         trend, remainder = self.decomposition(x)            # X_t, X_s
         trend_pred = self.trend_layer(trend)                # H_t
         remainder_pred = self.remainder_layer(remainder)    # H_s
