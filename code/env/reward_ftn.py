@@ -79,7 +79,7 @@ def reward_combined_pnl_sharpe(**kwargs):
     return float(combined_reward)
 
 def risk_adjusted_pnl_reward(alpha=1.0,
-                             beta=0.01,
+                             beta=0.2,
                              position_change_penalty=-0.01, 
                              margin_call_penalty=-1.0, 
                              maturity_date_penalty=-0.5,

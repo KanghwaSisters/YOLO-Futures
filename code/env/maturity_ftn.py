@@ -39,7 +39,7 @@ def calculate_maturity(dates):
                 for d in reversed(check_week): # 해당 주차의 날짜를 거꾸로 확인
                     if d.weekday() <= 3: # 목요일이 만기일 / 목요일이 없는 경우 목요일 이전 가장 가까운 날짜가 만기일
                         maturity = d.date()  # datetime.date(yyyy, mm, dd)
-                        maturity_list.append((date, maturity))
+                        maturity_list.append(maturity)
                         break
     
     return maturity_list

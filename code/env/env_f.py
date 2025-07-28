@@ -62,7 +62,11 @@ class FuturesEnvironment:
         self.current_timestep = date_range[0]
         
         # 만기일 계산
-        self.maturity_list = calculate_maturity(self.df.index)
+        mask = self._full_df.index >= pd.to_datetime(self._date_range[0])
+        dates = self._full_df.loc[mask].index.normalize().unique()
+
+        self.maturity_list = calculate_maturity(dates)
+        # print(self.maturity_list)
         self.maturity_iter = iter(self.maturity_list)
         self.latest_maturity_day = next(self.maturity_iter)
         
@@ -499,6 +503,10 @@ class FuturesEnvironment:
             returns=0.0,
             current_equity=initial_equity
         )
+
+        # 만기일 객체 초기화 
+        self.maturity_iter = iter(self.maturity_list)
+        self.latest_maturity_day = next(self.maturity_iter)
         
         # 7. 초기 상태 생성
         initial_state = self.state(
