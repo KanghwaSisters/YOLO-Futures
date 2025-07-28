@@ -114,39 +114,34 @@ class FuturesEnvironment:
         # 성과 추적용 리스트
         self.daily_returns = []
         self.trade_history = []
-    
+
     def get_mask(self):
-        """
-        현재 계좌 상태 및 포지션에 따라 가능한 행동(action)에 대한 마스크를 반환합니다.
-        마스크는 1 (가능) / 0 (불가능)로 구성된 numpy array입니다.
-        """
-        position = self.account.current_position
-        remaining_strength = self.position_cap - self.account.execution_strength
+        position = self.account.current_position                                    # 
+        remaining_strength = self.position_cap - self.account.execution_strength    # 가용 계약수 
         half = self.single_execution_cap
         n = self.n_actions
 
-        # 1. 기본 마스크 생성 (포지션 방향 기반)
+        # 기본 마스크 생성
         mask = np.ones(n, dtype=np.int32)
 
-        if position == -1:  # short
-            mask[:half] = 0
-        elif position == 1:  # long
-            mask[half + 1:] = 0
-        # hold일 경우 mask는 모두 1
+        if (self.position_cap == remaining_strength) or (self.info == 'insufficient'):
+            # 최대 체결 가능 계약수에 도달했을 때 
+            # 자본금 부족으로 새로운 포지션을 체결할 수 없을 때 
+            if position == -1: # short 
+                mask[:half] = 0
+    
+            elif position == 1: # long 
+                mask[-half:] = 0 
+            
 
-        # 2. 계약 수 제한 적용
-        if remaining_strength < half:
-            restriction = half - remaining_strength
-            if position == -1:
+        elif (remaining_strength) < self.single_execution_cap:
+            # 최대 체결 가능 계약수에 근접하여 일부 행동에 제약이 있다. 
+            restriction = half - remaining_strength 
+
+            if self.account.current_position == -1: # short 
                 mask[:restriction] = 0
-            elif position == 1:
+            elif self.account.current_position == 1: # long 
                 mask[-restriction:] = 0
-
-        # 3. 자본금 부족일 때는 포지션만 유지 가능
-        if self.info == 'insufficient':
-            # 추가 포지션 진입 불가하므로 hold만 가능
-            mask = np.zeros(n, dtype=np.int32)
-            mask[half] = 1  # hold 위치만 열어줌
 
         return mask.tolist()
     
@@ -181,15 +176,15 @@ class FuturesEnvironment:
         else:
             self.volatility_regime = 'normal'
     
-    def _force_liquidate_all_positions(self):
+    def _force_liquidate_all_positions(self, current_price):
         """리스크 제한 초과 시 모든 포지션 강제 청산"""
         if self.account.execution_strength == 0:
             return
 
         # 현재 체결된 계약에서 반대 포지션을 취함 
         reversed_execution = -self.account.execution_strength * self.account.current_position
-        net_pnl, cost = self.account.step(reversed_execution, self.previous_price, self.current_timestep)
-
+        net_pnl, cost = self.account.settle_total_contract(market_pt=current_price) # self.account.step(reversed_execution, self.previous_price, self.current_timestep)
+        # prev 맞는 지 고민하기 
         return net_pnl, cost, reversed_execution
     
     def _get_market_features(self) -> Dict[str, float]:
@@ -250,15 +245,6 @@ class FuturesEnvironment:
         return False, ''
     
     def step(self, action: int):
-        """
-        환경 한 스텝 진행
-        1) 거래 비용 및 슬리피지 계산
-        2) 포지션 및 평균 진입가 업데이트
-        3) 실현 및 미실현 손익 계산
-        4) 보상, 종료 여부 계산
-        5) 강제 청산 처리 (필요시)
-        6) 상태 및 기록 업데이트 후 반환
-        """
 
         # 다음 상태 데이터, 종가, 타임스텝 받아오기
         next_fixed_state, close_price, next_timestep = next(self.data_iterator)
@@ -278,23 +264,27 @@ class FuturesEnvironment:
         done, self.info = self.switch_done_info(next_timestep, self.current_timestep)
         
         # info를 확인하고 강제 청산 옵션 실행 
-        if self.info in ['margin_call', 'maturity_data', 'bankrupt']:
-            net_pnl, cost, reversed_execution = self._force_liquidate_all_positions()
+        if self.info in ['margin_call', 'maturity_data']:
+            net_pnl, _cost, reversed_execution = self._force_liquidate_all_positions(current_price) 
+
+            total_pnl = net_pnl + net_realized_pnl
+            total_cost = _cost + cost
 
             # 일일 수익률 계산 및 리스크 메트릭 업데이트
-            daily_return = (net_pnl + self.account.unrealized_pnl) / self.account.initial_budget
+            daily_return = (total_pnl + self.account.unrealized_pnl) / self.account.initial_budget
             self.daily_returns.append(daily_return)
-            self.risk_metrics.update(net_pnl, daily_return)
+            self.risk_metrics.update(total_pnl, daily_return)
 
             # 거래 내역 기록
             self.trade_history.append({
                     'timestamp': self.current_timestep,
                     'action': reversed_execution,
                     'price': self.previous_price,
-                    'pnl': net_pnl,
-                    'cost': cost,
+                    'pnl': total_pnl,
+                    'cost': total_cost,
                     'type': 'forced_liquidation'
                 })
+
         else:
             # 7. 일일 수익률 계산 및 리스크 메트릭 업데이트
             daily_return = (net_realized_pnl + self.account.unrealized_pnl) / self.account.initial_budget
@@ -308,7 +298,7 @@ class FuturesEnvironment:
                     'price': current_price,
                     'pnl': net_realized_pnl,
                     'cost': cost,
-                    'type': 'regular'
+                    'type': 'regular' if self.info !=  'bankrupt' else 'bankrupt'
                 })
 
         # 9. 다음 상태 생성 (여기에 시장 정보 포함)
@@ -332,11 +322,14 @@ class FuturesEnvironment:
             risk_metrics=self.risk_metrics,  # Sharpe ratio를 위해 RiskMetrics 객체 전달
             market_regime=self.market_regime,
             daily_return=daily_return,
-            net_realized_pnl=net_realized_pnl
+            net_realized_pnl=net_realized_pnl,
+            prev_position=self.account.prev_position,
+            current_position=self.account.current_position
         )
 
         # 12. action space에 대한 마스크 생성 
         self.mask = self.get_mask()
+
 
         # 업데이트 
         self.next_state = next_state
@@ -451,6 +444,7 @@ class FuturesEnvironment:
             f"💼  Current Position   : {self.position_dict[self.account.current_position]} ({self.account.current_position})\n"
             f"📊  Execution Strength : {self.account.execution_strength}/{self.position_cap}\n"
             f"📉  Unrealized PnL     : {self.account.unrealized_pnl:.2f} KRW\n"
+            f"🎉  Cum Realized PnL   : {self.account.realized_pnl:2f} KRW\n"
             f"💰  Current Budget     : {self.account.available_balance:.2f} KRW\n"
             f"💵  Total Return       : {perf['total_return']*100:.2f}%\n"
             f"⚖️  Avg Entry Price    : {self.account.average_entry:.2f}\n"

@@ -56,8 +56,9 @@ class NonEpisodicTrainer:
         self.n_bankruptcys = []
 
         self.path = path
+        ensure_dir(self.path)
     
-    def __call__(self, ):
+    def __call__(self):
         for idx, (train_interval, valid_interval) in enumerate(self.train_valid_timestep):
             print(f"== [{idx}] interval training ===========================")
             self.dataset_flag = idx
@@ -257,6 +258,7 @@ class NonEpisodicTrainer:
 
             # 지표 저장 
             if env.info in ['margin_call', 'maturity_data', 'bankrupt']:
+                print(env)
                 self.durations.append(maintained_steps)
                 n_bankruptcy += 1
                 maintained_steps = 0
