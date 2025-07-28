@@ -52,11 +52,40 @@ class NonEpisodicTrainer:
         self.models_per_steps = deque(maxlen=10)
 
         # indicator 
+        self.pnls = []
         self.durations = []
         self.n_bankruptcys = []
+        self.train_iter_rewards_all = []
 
         self.path = path
+        self.v_path = path + "/" + "visualization"
+        self.m_path = path + "/" + "models"
+
         ensure_dir(self.path)
+        ensure_dir(self.v_path)
+        ensure_dir(self.m_path)
+
+    def train_visualization(self):
+        fig, ax = plt.subplots(nrows=3, ncols=1, figsize=(18, 6))
+
+        fig.suptitle("Train Visualization", fontsize=18)
+
+        plot_rewards_with_ma(ax[0], self.train_iter_rewards_all, ma_window=10)
+        plot_both_pnl_ticks(ax[1], self.train_env.dataset.timesteps, self.pnls)
+
+        if len(self.durations) != 0:
+            plot_maintained_length(ax[2], self.durations)
+        else:
+            ax[2].axis('off')
+
+        path = self.v_path + '/' + f'I{self.dataset_flag}FT'
+
+        plt.savefig(path)
+        print(f"✅ 시각화 저장 완료: {path}")
+        plt.show()
+
+    
+
     
     def __call__(self):
         for idx, (train_interval, valid_interval) in enumerate(self.train_valid_timestep):
@@ -81,24 +110,24 @@ class NonEpisodicTrainer:
             model_pnls_all = {}
             model_volumes_all = {}
             model_rewards_all = {}
-            model_durations_all = {}
+            model_r_pnls_all = {}
 
             for key, model in models.items():
-                rewards, strengths, assets, durations, actions = self.valid(self.valid_env, self.valid_agent, key, model)
+                rewards, strengths, assets, r_pnls, actions = self.valid(self.valid_env, self.valid_agent, key, model)
                 model_rewards_all[key] = rewards
                 model_volumes_all[key] = strengths
                 model_pnls_all[key] = assets
-                model_durations_all[key] = durations
+                model_r_pnls_all[key] = r_pnls
                 model_actions_all[key] = actions
 
             valid_data['model_rewards_all'] = model_rewards_all
             valid_data['model_volumes_all'] = model_volumes_all
             valid_data['model_pnls_all'] = model_pnls_all
-            valid_data['model_durations_all'] = model_durations_all
+            valid_data['model_r_pnls_all'] = model_r_pnls_all
             valid_data['model_actions_all'] = model_actions_all
 
-            self.plot_all_validation_graphs(valid_data, self.path)
-            self.save_model_to(self.path)
+            self.plot_all_validation_graphs(valid_data, self.v_path)
+            self.save_model_to(self.m_path)
 
     def plot_all_validation_graphs(self, valid_data, save_path):
         
@@ -109,21 +138,22 @@ class NonEpisodicTrainer:
         model_actions_all = valid_data['model_actions_all']
         model_rewards_all = valid_data['model_rewards_all'] 
         model_volumes_all = valid_data['model_volumes_all']
+        model_r_pnls_all = valid_data['model_r_pnls_all']
         model_pnls_all = valid_data['model_pnls_all']
-        model_durations_all = valid_data['model_durations_all']
         reset_point = 50
 
 
-        fig, axs = plt.subplots(7, 1, figsize=(18, 21))
+        fig, axs = plt.subplots(9, 1, figsize=(18, 21))
         fig.suptitle("Validation Visualization", fontsize=18)
 
         for idx, (name, actions) in  enumerate(model_actions_all.items()):
             actions = np.array(actions)
             plot_market_with_actions(axs[idx], name, timesteps, market, actions, reset_point)
-        plot_pnls(axs[3], timesteps, model_pnls_all, reset_point)
+        plot_pnls(axs[3], timesteps, model_r_pnls_all, reset_point)
         plot_rewards(axs[4], model_rewards_all)
         plot_volumes(axs[5], model_volumes_all)
-        plot_durations(axs[6], model_durations_all)
+        for idx, (name, pnls) in enumerate(model_pnls_all.items()):
+            plot_both_pnl_ticks(axs[6+idx], list(range(len(pnls))), pnls)
 
         # axs[3, 1].axis('off')
 
@@ -173,7 +203,8 @@ class NonEpisodicTrainer:
         episode = 0
 
         maintained_steps = 0
-        memory = []
+        self.memory = []
+        self.durations = []
 
         state = env.reset()
 
@@ -208,7 +239,7 @@ class NonEpisodicTrainer:
                     agent_state = torch.tensor(next_state[1], dtype=torch.float32).unsqueeze(0).to(self.device)
                     next_state = (ts_state, agent_state)
 
-                memory.append([
+                self.memory.append([
                     state,
                     torch.tensor([[action]]),
                     torch.tensor([reward], dtype=torch.float32),
@@ -224,6 +255,9 @@ class NonEpisodicTrainer:
                 ep_len += 1
                 ep_n_positions[current_position] += 1
                 ep_execution_strength += execution_strength
+
+                # 지표 저장 
+                self.pnls.append((env.account.unrealized_pnl, env.account.realized_pnl - env.account.prev_realized_pnl))
 
             # update
             maintained_steps += ep_len
@@ -243,10 +277,10 @@ class NonEpisodicTrainer:
             episode_execution_strengths.append(ep_execution_strength)
 
             loss = None
-            if len(memory) >= agent.batch_size:
-                advantage = agent.cal_advantage(memory)
-                loss = agent.train(memory, advantage)
-                memory = []  # 학습 후에만 초기화
+            if len(self.memory) >= agent.batch_size:
+                advantage = agent.cal_advantage(self.memory)
+                loss = agent.train(self.memory, advantage)
+                self.memory = []  # 학습 후에만 초기화
 
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
@@ -256,15 +290,28 @@ class NonEpisodicTrainer:
             if (episode+1) % 50 == 0:
                 print(env)
 
-            # 지표 저장 
-            if env.info in ['margin_call', 'maturity_data', 'bankrupt']:
+            if env.info == 'bankrupt':
                 print(env)
                 self.durations.append(maintained_steps)
                 n_bankruptcy += 1
                 maintained_steps = 0
                 env.account.reset()
+                
+                # 시각화 
+                _, ax = plt.subplots(figsize=(12,6))
+                plot_both_pnl_ticks(ax, list(range(len(self.pnls))), self.pnls)
+                plt.tight_layout()
+
+                path = self.v_path + '/' + f'I{n_bankruptcy}T'
+
+                plt.savefig(path)
+                print(f"✅ 시각화 저장 완료: {path}")
+                # plt.show()
+
+                self.pnls = []
 
             episode += 1
+
 
         self.n_bankruptcys.append(n_bankruptcy)
 
@@ -292,6 +339,7 @@ class NonEpisodicTrainer:
         maintained_steps = 0
         episode = 0
         n_bankruptcy = 0
+        pnls = []
 
         state = env.reset()
 
@@ -329,6 +377,7 @@ class NonEpisodicTrainer:
                 ep_n_positions[current_position] += 1
                 ep_execution_strength += execution_strength
 
+                pnls.append((env.account.unrealized_pnl, env.account.realized_pnl - env.account.prev_realized_pnl))
                 env_execution_strengths.append(env.account.execution_strength)
                 asset_history.append(env.account.realized_pnl)
                 actions.append(action)
@@ -339,14 +388,14 @@ class NonEpisodicTrainer:
             moving_avg_rewards.append(ep_reward)
             episode_execution_strengths.append(ep_execution_strength)
 
-            avg_reward = np.mean(moving_avg_rewards)
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
-            if env.info in ['margin_call', 'maturity_data', 'bankrupt']:
+            if env.info in ['bankrupt']:
                 durations.append(maintained_steps)
                 n_bankruptcy += 1
                 maintained_steps = 0
                 env.account.reset()
+                pnls = []
 
             print(f"[{self.dataset_flag}|Valid] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
 
@@ -358,16 +407,12 @@ class NonEpisodicTrainer:
         print(f"\n==[Valid2 결과 요약:Interval{self.dataset_flag}] ==============================")
         print(f"  - 총 에피소드 수: {episode}")
         print(f"  - 평균 보상: {np.mean(episode_rewards):.2f}")
-        print(f"  - 평균 유지 시간: {np.mean(durations):.2f} step")
         print(f"  - 마지막 수익: {asset_history[-1]:.2f}")
         print("============================================================\n")
 
-        return episode_rewards, env_execution_strengths, asset_history, durations, actions
+        return episode_rewards, env_execution_strengths, pnls, asset_history, actions
 
     def save_model_to(self, path):
-        # 디렉토리 확인 및 생성
-        ensure_dir(path)
-
         # 가장 최근 모델 저장
         if self.latest_model is not None:
             torch.save(self.latest_model, os.path.join(path, f'I{self.dataset_flag+1}latest.pth'))
@@ -383,6 +428,24 @@ class NonEpisodicTrainer:
         for idx, model_state in enumerate(recent_models):
             torch.save(model_state, os.path.join(path, f'I{self.dataset_flag+1}_{(idx+1)}steps.pth'))
         print(f"[Saved] {len(recent_models)} recent models")
+
+    def save(self, CONFIG):
+
+        # 설정 문자열 생성
+        config_lines = []
+        config_lines.append("===== CONFIGURATION SETTINGS =====\n")
+        for key, value in CONFIG.items():
+            config_lines.append(f"{key}: {value}")
+        config_str = "\n".join(config_lines)
+
+        save_path = os.path.join(self.path, "setting.txt")
+
+        # 파일로 저장
+        with open(save_path, "w") as f:
+            f.write(config_str)
+
+        print(f"✅ 설정 저장 완료: {save_path}")
+
 
     def split_position_strength(self, action):
         if action == 0:

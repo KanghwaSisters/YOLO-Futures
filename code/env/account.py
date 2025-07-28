@@ -126,6 +126,7 @@ class Account:
 
             # 실현 손익
             net_pnl = pnl - cost
+            self.prev_realized_pnl = self.realized_pnl
             self.realized_pnl += net_pnl
 
             # 계좌 변동
@@ -156,6 +157,7 @@ class Account:
         self.maintenance_margin = 0
 
         # 실현 손익
+        self.prev_realized_pnl = self.realized_pnl
         self.realized_pnl += net_pnl
 
         # 계좌 변동
@@ -184,6 +186,7 @@ class Account:
             self.prev_unrealized_pnl = self.unrealized_pnl
 
             # 미실현 손익 -> 실현 손익 전환
+            self.prev_realized_pnl = self.realized_pnl
             self.realized_pnl += daily_settle
             self.unrealized_pnl = 0
 
@@ -258,6 +261,7 @@ class Account:
 
         # 손익
         self.realized_pnl = 0                   # 실현 손익 (KRW)
+        self.prev_realized_pnl = 0              # 직전 스텝의 실현 손익 (KRW)
         self.unrealized_pnl = 0                 # 미실현 손익 (KRW)
         self.prev_unrealized_pnl = 0            # 직전 스텝의 미실현 손익 (KRW)
         self.total_transaction_costs = 0        # 총 수수료 (KRW)
