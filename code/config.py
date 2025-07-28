@@ -27,7 +27,7 @@ CONFIG = EasyDict({
 
     # 모델 설정
     'INPUT_DIM': None,  # 외부에서 target_values로부터 정의
-    'AGENT_INPUT_DIM': 6,
+    'AGENT_INPUT_DIM': 7,
     'EMBED_DIM': 32,
     'KERNEL_SIZE': 4,
     'STRIDE': 1,
@@ -48,5 +48,5 @@ CONFIG = EasyDict({
     'REWARD_FTN': None,  # 외부에서 정의
     'DONE_FTN': None,    # 외부에서 정의
     'SCALER': None,      # 외부에서 정의
-    'PATH': '/Users/ijimin/Documents/GitHub/YOLO-Futures/logs/test2',
+    'PATH': '/Users/ijimin/Documents/GitHub/YOLO-Futures/logs/test3',
 })

@@ -7,7 +7,6 @@ from env.done_ftn import *
 from env.reward_ftn import *
 from env.account import *
 from env.maturity_ftn import *
-from env.market import *
 
 # 선물 트레이딩 환경 클래스
 from env.risk import RiskMetrics, MarketStateManager, PerformanceTracker, MarketRegime
@@ -64,6 +63,8 @@ class FuturesEnvironment:
         
         # 만기일 계산
         self.maturity_list = calculate_maturity(self.df.index)
+        self.maturity_iter = iter(self.maturity_list)
+        self.latest_maturity_day = next(self.maturity_iter)
         
         # === 계좌 및 거래 비용 설정 ===
         self.account = Account(start_budget, position_cap, self.current_timestep, 
@@ -83,7 +84,7 @@ class FuturesEnvironment:
         
         # === 환경 상태 변수 ===
         self.info = ''
-        self.mask = [1] * self.n_actions
+        self.mask = np.ones(self.n_actions, dtype=np.int32).tolist()
         
         # === 페널티 설정 ===
         self.hold_over_penalty = -0.05
@@ -97,6 +98,16 @@ class FuturesEnvironment:
         # 성과 추적용 리스트
         self.daily_returns = []
         self.trade_history = []
+
+    def _get_n_days_before_maturity(self, current_timestep):
+        current_day = current_timestep.date()
+
+        # 만약 만기일을 넘었다면, 다음 만기일로 이동 
+        if (self.latest_maturity_day - current_day).days <= -1:
+            self.latest_maturity_day = next(self.maturity_iter)
+        
+        return (self.latest_maturity_day - current_day).days
+
 
     def get_mask(self):
         position = self.account.current_position                                    # 
@@ -160,7 +171,7 @@ class FuturesEnvironment:
             'total_trades': self.account.total_trades,
             'transaction_cost_ratio': self.account.total_transaction_costs / self.account.initial_budget
         }
-
+    
     def _is_dataset_reached_end(self, current_timestep):
         done = self.dataset.reach_end(current_timestep)
         info = 'end_of_data' if done else ''
@@ -172,21 +183,39 @@ class FuturesEnvironment:
         day_changed = is_day_changed(next_timestep=next_timestep,
                                      current_timestep=current_timestep)
         
-        # 강제 청산 거래 기록
-        self.performance_tracker.update_trade(
-            action=reversed_execution,
-            net_pnl=net_pnl,
-            cost=cost,
-            current_price=self.previous_price,
-            current_timestep=str(self.current_timestep),
-            current_equity=self.account.available_balance + self.account.unrealized_pnl,
-            position=self.account.current_position,
-            execution_strength=self.account.execution_strength,
-            trade_type='forced_liquidation'
-        )
-        
-        return net_pnl
+        done = is_maturity_date & day_changed
+
+        info = 'maturity_data' if done else ''
+        return done, info
     
+    def _is_bankrupt(self):
+        done = self.account.available_balance <= 0
+        info = 'bankrupt' if done else ''
+        return done, info
+    
+    def _check_near_margin_call(self):
+        # 현재 딱 마진콜 기준 (7%)
+        if (self.account.available_balance <= self.account.maintenance_margin):
+            self.info = 'margin_call' 
+
+    def _check_insufficient(self):
+        # 새로운 계약을 체결할 수 없는 경우의 조건
+        # 일 뿐 done=True가 아니다 
+        if (self.account.available_balance <= self.previous_price * self.account.initial_margin_rate):
+            self.info = 'insufficient'
+
+    def _is_risk_limits(self):
+        """최대 손실 한도, 최대 드로우다운 초과 여부 확인"""
+        total_return = (self.account.available_balance + self.account.unrealized_pnl) / self.account.initial_budget - 1
+        if total_return < -self.max_drawdown_limit:
+            return True, 'risk_limits' 
+        
+        max_dd = self.risk_metrics.get_max_drawdown()
+        if max_dd < -self.max_drawdown_limit:
+            return True, 'risk_limits'
+        
+        return False, ''
+
     def _update_market_conditions(self):
         """시장 상태 업데이트"""
         current_idx = self.df.index.get_loc(self.current_timestep)
@@ -356,7 +385,8 @@ class FuturesEnvironment:
             net_realized_pnl=net_realized_pnl,
             realized_pnl=net_realized_pnl,
             prev_position=self.account.prev_position,
-            current_position=self.account.current_position
+            current_position=self.account.current_position,
+            execution_strength=self.account.execution_strength
         )
         
         # 12. 다음 상태 생성
@@ -364,10 +394,11 @@ class FuturesEnvironment:
             next_fixed_state,
             current_position=self.account.current_position,
             execution_strength=self.account.execution_strength,
-            realized_pnl=self.account.realized_pnl / self.account.initial_margin_rate,
-            unrealized_pnl=(self.account.unrealized_pnl - self.account.prev_unrealized_pnl) / self.account.initial_margin_rate,
-            maintenance_margin=self.account.maintenance_margin / self.account.initial_margin_rate,
-            total_transaction_costs=self.account.total_transaction_costs / self.account.initial_margin_rate
+            n_days_before_ma=self._get_n_days_before_maturity(self.current_timestep),
+            realized_pnl=self.account.realized_pnl / self.account.contract_unit ,                       # (pt)
+            unrealized_pnl=self.account.unrealized_pnl / self.account.contract_unit ,                   # (pt)
+            available_balance=self.account.available_balance / self.account.contract_unit,              # (pt)
+            total_transaction_costs=self.account.total_transaction_costs / self.account.contract_unit  # (pt)
         )
 
         # 12. action space에 대한 마스크 생성 
@@ -474,10 +505,11 @@ class FuturesEnvironment:
             fixed_state,
             current_position=self.account.current_position,
             execution_strength=self.account.execution_strength,
-            realized_pnl=self.account.realized_pnl,
-            unrealized_pnl=self.account.unrealized_pnl,
-            maintenance_margin=self.account.maintenance_margin,
-            total_transaction_costs=self.account.total_transaction_costs
+            n_days_before_ma=self._get_n_days_before_maturity(self.current_timestep),
+            realized_pnl=self.account.realized_pnl / self.account.contract_unit ,                       # (pt)
+            unrealized_pnl=self.account.unrealized_pnl / self.account.contract_unit ,                   # (pt)
+            available_balance=self.account.available_balance / self.account.contract_unit,              # (pt)
+            total_transaction_costs=self.account.total_transaction_costs / self.account.contract_unit   # (pt)
         )
         
         return initial_state

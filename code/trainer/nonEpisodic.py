@@ -55,7 +55,7 @@ class NonEpisodicTrainer:
         self.pnls = []
         self.durations = []
         self.n_bankruptcys = []
-        self.train_iter_rewards_all = []
+        self.train_iter_rewards_all = {}
         
         # 학습 추적용 변수 추가
         self.train_rewards_history = []
@@ -70,15 +70,15 @@ class NonEpisodicTrainer:
         ensure_dir(self.m_path)
 
     def train_visualization(self):
-        fig, ax = plt.subplots(nrows=3, ncols=1, figsize=(18, 6))
+        fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(18, 6))
 
         fig.suptitle("Train Visualization", fontsize=18)
 
-        plot_rewards_with_ma(ax[0], self.train_iter_rewards_all, ma_window=10)
-        plot_both_pnl_ticks(ax[1], self.train_env.dataset.timesteps, self.pnls)
+        # plot_rewards_with_ma(ax[0], self.train_iter_rewards_all, ma_window=10)
+        plot_both_pnl_ticks(ax[0], list(range(len(self.pnls))), self.pnls)
 
         if len(self.durations) != 0:
-            plot_maintained_length(ax[2], self.durations)
+            plot_maintained_length(ax[1], self.durations)
         else:
             ax[2].axis('off')
 
@@ -97,6 +97,7 @@ class NonEpisodicTrainer:
 
             print(f">>>> Train : {train_interval}")
             self.train(self.train_env, self.agent)
+            self.train_visualization()
 
             print(f">>>> Valid : {valid_interval}")
 
@@ -112,13 +113,10 @@ class NonEpisodicTrainer:
             model_volumes_all = {}
             model_rewards_all = {}
             model_r_pnls_all = {}
-
-            for key, model in models.items():
-                rewards, strengths, assets, r_pnls, actions = self.valid(self.valid_env, self.valid_agent, key, model)
             model_equities_all = {}  # 새로 추가: 자산 변화 추적
 
             for key, model in models.items():
-                rewards, strengths, assets, durations, actions, equities = self.valid(self.valid_env, self.valid_agent, key, model)
+                rewards, strengths, assets, r_pnls, actions, equities = self.valid(self.valid_env, self.valid_agent, key, model)
                 model_rewards_all[key] = rewards
                 model_volumes_all[key] = strengths
                 model_pnls_all[key] = assets
@@ -156,11 +154,8 @@ class NonEpisodicTrainer:
         train_losses = valid_data['train_losses']
         reset_point = 50
 
-        fig, axs = plt.subplots(12, 1, figsize=(18, 36))
+        fig, axs = plt.subplots(13, 1, figsize=(18, 36))
         fig.suptitle("Enhanced Validation Visualization", fontsize=18)
-
-        fig, axs = plt.subplots(9, 1, figsize=(18, 21))
-        fig.suptitle("Validation Visualization", fontsize=18)
 
         for idx, (name, actions) in  enumerate(model_actions_all.items()):
             actions = np.array(actions)
@@ -172,17 +167,17 @@ class NonEpisodicTrainer:
             plot_both_pnl_ticks(axs[6+idx], list(range(len(pnls))), pnls)
 
         # 7. 자산 변화 곡선
-        plot_equity_curves(axs[7], timesteps, model_equities_all, reset_point, self.start_budget)
+        plot_equity_curves(axs[9], timesteps, model_equities_all, reset_point, self.start_budget)
         
         # 8. 포지션 추적 (대표 모델 1개만 - latest model)
         latest_actions = model_actions_all['latest model']
-        plot_position_tracking(axs[8], timesteps, latest_actions, reset_point)
+        plot_position_tracking(axs[10], timesteps, latest_actions, reset_point)
         
         # 9. 드로우다운 분석 (리스크 시각화)
-        plot_drawdown_analysis(axs[9], timesteps, model_equities_all, reset_point, self.start_budget)
+        plot_drawdown_analysis(axs[11], timesteps, model_equities_all, reset_point, self.start_budget)
         
         # 10. 학습 곡선 (보상 & 손실)
-        plot_training_curves(axs[10], train_rewards, train_losses)
+        plot_training_curves(axs[12], train_rewards, train_losses)
         
         # 11. 액션 분포 히트맵 (대표 모델의 액션 패턴)
         latest_actions = model_actions_all['latest model']
@@ -452,7 +447,7 @@ class NonEpisodicTrainer:
 
             episode += 1
 
-        print(f"\n==[Valid2 결과 요약:Interval{self.dataset_flag}] ==============================")
+        print(f"\n==[Valid 결과 요약:Interval{self.dataset_flag}] ==============================")
         print(f"  - 총 에피소드 수: {episode}")
         print(f"  - 평균 보상: {np.mean(episode_rewards):.2f}")
         print(f"  - 마지막 수익: {asset_history[-1]:.2f}")

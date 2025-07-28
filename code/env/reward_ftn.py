@@ -106,16 +106,16 @@ def risk_adjusted_pnl_reward(alpha=1.0,
     # if np.sign(delta_position) == -1:
     #     reward += position_change_penalty
 
-    # 5. 마진콜일 때 패널티 부여 
+    # 마진콜일 때 패널티 부여 
     if env_info == 'margin_call':
         reward += margin_call_penalty
 
-    # 6. 파산일 때 패널티 부여 
+    #  파산일 때 패널티 부여 
     elif env_info == 'bankrupt':
         reward += bankrupt_penalty
 
-    # 7. 만기일일 때 패널티 부여 
-    elif env_info == 'maturity_data':
+    # 7. 만기일 마지막 시점에서 포지션을 들고 있으면 패널티 부여 
+    elif (env_info == 'maturity_data') & (kwargs['execution_strength'] != 0):
         reward += maturity_date_penalty
 
     elif env_info == 'insufficient':
