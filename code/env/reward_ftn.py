@@ -79,13 +79,13 @@ def reward_combined_pnl_sharpe(**kwargs):
     return float(combined_reward)
 
 def risk_adjusted_pnl_reward(
-                            hold_over_penalty=-0.01, 
-                            margin_call_penalty=-1.0, 
-                            maturity_date_penalty=-0.5,
-                            bankrupt_penalty=-2.0, 
-                            insufficient_penalty=-0.5,
+                            hold_over_penalty=-0.02, 
+                            margin_call_penalty=-1.5, 
+                            maturity_date_penalty=-0.8,
+                            bankrupt_penalty=-4.0, 
+                            insufficient_penalty=-0.2,
                             risk_penalty=-1.0,
-                            initial_budget=1_000_000,
+                            initial_budget=2_000_000,
                             env_info='',
                             **kwargs
                         ):

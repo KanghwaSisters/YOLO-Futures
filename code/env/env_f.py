@@ -303,7 +303,8 @@ class FuturesEnvironment:
             risk_metrics=self.risk_metrics,
             market_regime=self.market_state_manager.market_regime,
             daily_return=daily_return,
-            net_realized_pnl=net_realized_pnl
+            net_realized_pnl=net_realized_pnl,
+            realized_pnl=net_realized_pnl
         )
         
         # 12. 다음 상태 생성
