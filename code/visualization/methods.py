@@ -188,23 +188,27 @@ def plot_training_curves(ax, train_rewards, train_losses):
     
     ax.grid(True, alpha=0.3)
 
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
 def plot_action_distribution_heatmap(ax, timesteps, actions, n_actions=21):
     """액션 분포 히트맵 - 시간에 따른 액션 선택 패턴 (실제 액션 값 기준)"""
     # 액션 범위 계산: n_actions=21이면 -10~+10
     action_center = n_actions // 2  # 10 (hold 액션)
     min_action = -action_center     # -10
     max_action = action_center      # +10
-    
+
     # 액션을 시간 구간별로 그룹화
     n_time_bins = min(50, len(actions) // 10)  # 최대 50개 구간
     if n_time_bins < 5:
         n_time_bins = min(10, len(actions))
-    
+
     time_bins = np.array_split(range(len(actions)), n_time_bins)
-    
+
     # 실제 액션 값별 카운트 (인덱스가 아닌 실제 값)
     action_counts = np.zeros((n_time_bins, n_actions))
-    
+
     for i, time_bin in enumerate(time_bins):
         if len(time_bin) > 0:
             bin_actions = [actions[j] for j in time_bin]
@@ -213,21 +217,29 @@ def plot_action_distribution_heatmap(ax, timesteps, actions, n_actions=21):
                 action_idx = raw_action + action_center
                 if 0 <= action_idx < n_actions:
                     action_counts[i, action_idx] += 1
-    
+
     # 정규화 (각 시간 구간의 합이 1이 되도록)
     row_sums = action_counts.sum(axis=1, keepdims=True)
     row_sums[row_sums == 0] = 1  # 0으로 나누기 방지
     action_probs = action_counts / row_sums
-    
+
+    extent = [0, action_probs.shape[0], min_action - 0.5, max_action + 0.5]
+
     # 히트맵 그리기
-    im = ax.imshow(action_probs.T, aspect='auto', cmap='YlOrRd', 
-                   interpolation='nearest', origin='lower')
-    
+    im = ax.imshow(
+        action_probs.T,
+        aspect='auto',
+        cmap='Greys',
+        interpolation='nearest',
+        origin='lower',
+        extent=extent
+    )
+
     # 축 레이블 설정
     ax.set_xlabel('Time Periods')
     ax.set_ylabel('Action Value')
     ax.set_title('Action Distribution Heatmap Over Time (Action Values)')
-    
+
     # x축: 시간 구간별 대표 타임스탬프
     if len(timesteps) > 0:
         time_labels = []
@@ -239,38 +251,35 @@ def plot_action_distribution_heatmap(ax, timesteps, actions, n_actions=21):
                 else:
                     time_labels.append('')
         
-        tick_positions = np.linspace(0, len(time_bins)-1, len(time_labels))
+        tick_positions = np.linspace(0, len(time_bins), len(time_labels))
         ax.set_xticks(tick_positions)
         ax.set_xticklabels(time_labels, rotation=45)
-    
-    # y축: 실제 액션 값으로 표시 (의미있는 구간들)
-    important_action_indices = [0, action_center//2, action_center, 
-                               action_center + action_center//2, n_actions-1]
-    important_action_values = [idx - action_center for idx in important_action_indices]  # 실제 값으로 변환
-    
-    ax.set_yticks(important_action_indices)
+
+    # y축: 실제 액션 값으로 표시
+    important_action_values = [min_action, -5, 0, 5, max_action]
+    ax.set_yticks(important_action_values)
     ax.set_yticklabels([f'{val:+d}' if val != 0 else '0(Hold)' for val in important_action_values])
-    
+
     # 컬러바 추가
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)
     cbar.set_label('Action Probability', rotation=270, labelpad=20)
-    
+
     # 중요한 액션 영역 표시
     # Hold 영역 (0 근처)
-    ax.axhline(action_center-0.5, color='blue', linestyle='--', alpha=0.5, linewidth=1)
-    ax.axhline(action_center+0.5, color='blue', linestyle='--', alpha=0.5, linewidth=1)
-    ax.text(len(time_bins)*0.02, action_center, 'HOLD(0)', 
+    ax.axhline(0 - 0.5, color='blue', linestyle='--', alpha=0.5, linewidth=1)
+    ax.axhline(0 + 0.5, color='blue', linestyle='--', alpha=0.5, linewidth=1)
+    ax.text(len(time_bins)*0.02, 0, 'HOLD(0)', 
+           bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgreen', alpha=0.7),
+           fontsize=8)
+
+    # Short 영역 (음수)
+    ax.axhspan(min_action - 0.5, -0.5, alpha=0.1, color='blue', label='Short Zone')
+    ax.text(len(time_bins)*0.02, min_action + 2.5, 'SHORT(-)', 
            bbox=dict(boxstyle='round,pad=0.2', facecolor='lightblue', alpha=0.7),
            fontsize=8)
-    
-    # Short 영역 (음수)
-    ax.axhspan(0, action_center-0.5, alpha=0.1, color='blue', label='Short Zone')
-    ax.text(len(time_bins)*0.02, action_center*0.25, 'SHORT(-)', 
+
+    # Long 영역 (양수)
+    ax.axhspan(0.5, max_action + 0.5, alpha=0.1, color='red', label='Long Zone')
+    ax.text(len(time_bins)*0.02, max_action - 2.5, 'LONG(+)', 
            bbox=dict(boxstyle='round,pad=0.2', facecolor='lightcoral', alpha=0.7),
-           fontsize=8)
-    
-    # Long 영역 (양수)  
-    ax.axhspan(action_center+0.5, n_actions-1, alpha=0.1, color='red', label='Long Zone')
-    ax.text(len(time_bins)*0.02, action_center + action_center*0.75, 'LONG(+)', 
-           bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgreen', alpha=0.7),
            fontsize=8)
