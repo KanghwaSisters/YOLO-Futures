@@ -78,30 +78,33 @@ def reward_combined_pnl_sharpe(**kwargs):
     
     return float(combined_reward)
 
-def risk_adjusted_pnl_reward(
-                            hold_over_penalty=-0.01, 
-                            margin_call_penalty=-1.0, 
-                            maturity_date_penalty=-0.5,
-                            bankrupt_penalty=-2.0, 
-                            insufficient_penalty=-0.5,
-                            risk_penalty=-1.0,
-                            initial_budget=1_000_000,
-                            env_info='',
-                            **kwargs
+def risk_adjusted_pnl_reward(alpha=1.0,
+                             beta=0.01,
+                             position_change_penalty=-0.01, 
+                             margin_call_penalty=-1.0, 
+                             maturity_date_penalty=-0.5,
+                             bankrupt_penalty=-3.0, 
+                             insufficient_penalty=-0.5,
+                             risk_penalty=-1.0,
+                             scaling_factor = 10_000,
+                             env_info='',
+                             **kwargs
                         ):
     
     # 1. 미실현 손익의 변화량 
     delta_unrealized_pnl = (kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']) 
 
-    # 2. 실현 손익의 변화량 
-    realized_pnl = kwargs['realized_pnl'] 
+    # 2. 순실현 손익
+    realized_pnl = kwargs['net_realized_pnl'] 
 
     # 3. 실현 손익과 미실현 손익을 더한 reward
-    reward = (delta_unrealized_pnl + realized_pnl) / initial_budget
+    reward = (beta*delta_unrealized_pnl + alpha*realized_pnl) / scaling_factor
+    # print(reward)
 
-    # 4. 장기 보유 시 패널티 부여
-    # if kwargs['unrealized_pnl'] != 0:
-    #     reward += hold_over_penalty
+    # # 4. 포지션 변경 시 패널티 부여 
+    # delta_position = kwargs['current_position'] * kwargs['prev_position']
+    # if np.sign(delta_position) == -1:
+    #     reward += position_change_penalty
 
     # 5. 마진콜일 때 패널티 부여 
     if env_info == 'margin_call':
