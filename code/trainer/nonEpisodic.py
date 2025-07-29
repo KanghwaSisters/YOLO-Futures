@@ -154,7 +154,7 @@ class NonEpisodicTrainer:
         train_losses = valid_data['train_losses']
         reset_point = 50
 
-        fig, axs = plt.subplots(13, 1, figsize=(18, 36))
+        fig, axs = plt.subplots(14, 1, figsize=(18, 36))
         fig.suptitle("Enhanced Validation Visualization", fontsize=18)
 
         for idx, (name, actions) in  enumerate(model_actions_all.items()):
@@ -181,14 +181,14 @@ class NonEpisodicTrainer:
         
         # 11. 액션 분포 히트맵 (대표 모델의 액션 패턴)
         latest_actions = model_actions_all['latest model']
-        plot_action_distribution_heatmap(axs[11], timesteps, latest_actions, self.agent.n_actions)
+        plot_action_distribution_heatmap(axs[13], timesteps, latest_actions, self.agent.n_actions)
 
         for ax in axs.flatten():
             ax.tick_params(axis='x', rotation=45)
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(path)
-        print(f"✅ 강화된 시각화 저장 완료 (학습 상태 포함): {path}")
+        print(f"✅ 시각화 저장 완료 (학습 상태 포함): {path}")
         
         # 메모리 정리
         plt.close(fig)
