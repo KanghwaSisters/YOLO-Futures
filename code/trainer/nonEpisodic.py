@@ -80,13 +80,12 @@ class NonEpisodicTrainer:
         if len(self.durations) != 0:
             plot_maintained_length(ax[1], self.durations)
         else:
-            ax[2].axis('off')
+            ax[1].axis('off')
 
         path = self.v_path + '/' + f'I{self.dataset_flag}FT'
 
         plt.savefig(path)
         print(f"✅ 시각화 저장 완료: {path}")
-        plt.show()
 
     def __call__(self):
         for idx, (train_interval, valid_interval) in enumerate(self.train_valid_timestep):
@@ -114,15 +113,17 @@ class NonEpisodicTrainer:
             model_rewards_all = {}
             model_r_pnls_all = {}
             model_equities_all = {}  # 새로 추가: 자산 변화 추적
+            model_contracts_all = {}
 
             for key, model in models.items():
-                rewards, strengths, assets, r_pnls, actions, equities = self.valid(self.valid_env, self.valid_agent, key, model)
+                rewards, strengths, assets, r_pnls, actions, equities, contracts = self.valid(self.valid_env, self.valid_agent, key, model)
                 model_rewards_all[key] = rewards
                 model_volumes_all[key] = strengths
                 model_pnls_all[key] = assets
                 model_r_pnls_all[key] = r_pnls
                 model_actions_all[key] = actions
                 model_equities_all[key] = equities  # 새로 추가
+                model_contracts_all[key] = contracts # 새로 추가 
 
             valid_data['model_rewards_all'] = model_rewards_all
             valid_data['model_volumes_all'] = model_volumes_all
@@ -130,6 +131,8 @@ class NonEpisodicTrainer:
             valid_data['model_r_pnls_all'] = model_r_pnls_all
             valid_data['model_actions_all'] = model_actions_all
             valid_data['model_equities_all'] = model_equities_all  # 새로 추가
+            valid_data['model_contracts_all'] = model_contracts_all # 새로 추가 
+
             
             # 학습 데이터 추가
             valid_data['train_rewards'] = self.train_rewards_history
@@ -150,6 +153,7 @@ class NonEpisodicTrainer:
         model_r_pnls_all = valid_data['model_r_pnls_all']
         model_pnls_all = valid_data['model_pnls_all']
         model_equities_all = valid_data['model_equities_all']  # 새로 추가
+        model_contracts_all = valid_data['model_contracts_all']
         train_rewards = valid_data['train_rewards']
         train_losses = valid_data['train_losses']
         reset_point = 50
@@ -159,7 +163,7 @@ class NonEpisodicTrainer:
 
         for idx, (name, actions) in  enumerate(model_actions_all.items()):
             actions = np.array(actions)
-            plot_market_with_actions(axs[idx], name, timesteps, market, actions, reset_point)
+            plot_market_with_actions(axs[idx], name, timesteps, market, actions, reset_point, model_contracts_all[name])
         plot_pnls(axs[3], timesteps, model_r_pnls_all, reset_point)
         plot_rewards(axs[4], model_rewards_all)
         plot_volumes(axs[5], model_volumes_all)
@@ -372,6 +376,7 @@ class NonEpisodicTrainer:
         episode_rewards = []
         actions = []
         equity_history = []  # 새로 추가: 총 자산 추적
+        contract_history = []
 
         moving_avg_rewards = deque(maxlen=self.ma_interval)
         episode_execution_strengths = deque(maxlen=self.n_steps)
@@ -420,10 +425,12 @@ class NonEpisodicTrainer:
                 env_execution_strengths.append(env.account.execution_strength)
                 asset_history.append(env.account.realized_pnl)
                 actions.append(action)
+                contract_history.append(env.account.current_position * env.account.execution_strength)
                 
                 # 새로 추가: 총 자산 (available_balance + unrealized_pnl) 기록
                 current_equity = env.account.available_balance + env.account.unrealized_pnl
                 equity_history.append(max(current_equity, 1.0))  # 음수 방지
+
 
             # 에피소드 종료 후 기록
             maintained_steps += ep_len
@@ -439,6 +446,7 @@ class NonEpisodicTrainer:
                 maintained_steps = 0
                 env.account.reset()
                 pnls = []
+                contract_history = []
 
             print(f"[{self.dataset_flag}|Valid] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
 
@@ -454,7 +462,7 @@ class NonEpisodicTrainer:
         print(f"  - 최종 총 자산: {equity_history[-1]:.2f}")  # 새로 추가
         print("============================================================\n")
 
-        return episode_rewards, env_execution_strengths, pnls, asset_history, actions,equity_history
+        return episode_rewards, env_execution_strengths, pnls, asset_history, actions,equity_history, contract_history
 
     def save_model_to(self, path):
         # 가장 최근 모델 저장

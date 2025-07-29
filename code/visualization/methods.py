@@ -9,22 +9,42 @@ def apply_string_xticks(ax, timesteps, n_ticks=6):
     ax.set_xticks(idxs)
     ax.set_xticklabels([ticklabels[i] for i in idxs], rotation=45)
 
-def plot_market_with_actions(ax, name, timesteps, market, actions, reset_point):
-    ax.plot(range(len(market)), market, label='Market Price', color='black')
+def plot_market_with_actions(ax, name, timesteps, market, actions, reset_point, cumulative_actions):
+    x = np.arange(len(market))
+    
+    # 배경 색상 (누적 행동 기반)
+    for i in range(len(cumulative_actions)):
+        alpha = min(abs(cumulative_actions[i]) / 10, 1.0)
+        color = 'red' if cumulative_actions[i] > 0 else 'blue' if cumulative_actions[i] < 0 else None
+        if color:
+            ax.axvspan(i - 0.5, i + 0.5, facecolor=color, alpha=alpha * 0.1, zorder=0)
+
+    # 시장 가격 라인
+    ax.plot(x, market, label='Market Price', color='black', linewidth=1.2)
+
+    # 행동 점 시각화
     colors = np.where(actions > 0, 'red', np.where(actions < 0, 'blue', 'gray'))
-    labels = { 'red': 'Long', 'blue': 'Short', 'gray': 'Hold' }
+    labels = {'red': 'Long', 'blue': 'Short', 'gray': 'Hold'}
     plotted_labels = set()
     for t, a in enumerate(actions):
         color = colors[t]
         label = labels[color] if color not in plotted_labels else None
-        ax.scatter(t, market[t], color=color, alpha=min(abs(a) / 10, 1.0), s=30, label=label)
+        edgecolor = 'black'
+        ax.scatter(t, market[t], color=color, edgecolors=edgecolor, marker='^', 
+                   alpha=min(abs(a) / 10, 1.0), s=40, label=label, zorder=3)
         plotted_labels.add(color)
-    ax.axvline(reset_point, linestyle='--', color='black', alpha=0.3, label='Init Recharge Point')
+
+    # 리셋 지점 표시
+    ax.axvline(reset_point, linestyle='--', color='black', alpha=0.3, label='Init Recharge Point', zorder=2)
+
+    # 기타 설정
     ax.set_title(f'Market Flow with Actions : {name}')
     ax.set_ylabel('Market')
     ax.set_xlabel('Date')
-    apply_string_xticks(ax, timesteps)
-    ax.legend()
+    ax.set_xticks(np.linspace(0, len(timesteps)-1, min(10, len(timesteps))))
+    ax.set_xticklabels([str(timesteps[int(i)])[:10] for i in np.linspace(0, len(timesteps)-1, min(10, len(timesteps)))], rotation=45)
+    ax.legend(loc='best')
+    ax.grid(True)
 
 def plot_model_returns(ax, timesteps, model_returns_all, reset_point):
     for name, series in model_returns_all.items():
