@@ -37,6 +37,7 @@ class Account:
 
         # 직전 스텝 미실현 수익 저장
         self.prev_unrealized_pnl = self.unrealized_pnl
+        self.prev_realized_pnl = self.realized_pnl
         if self.execution_strength != 0:
             self.ave_prev_unrealized_pnl = self.prev_unrealized_pnl / self.execution_strength
 
