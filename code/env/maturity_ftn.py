@@ -8,8 +8,12 @@ def calculate_maturity(dates):
     maturity_list = []
 
     for date in dates:
+        cut = date.day // 7
+        weekday = date.weekday()
+
         # 시작 날짜가 해당 월의 만기일 이후인 경우 스킵
-        if date.day > 14:
+        if ((cut == 1) & (weekday > 3)) or ((cut == 2) & (weekday > 0)):
+            month = date.month
             continue
         
         # 월이 바뀌면 실행
@@ -17,13 +21,22 @@ def calculate_maturity(dates):
             continue
 
         else:
-            if (date.weekday() <= 3) or ((date.weekday() == 4) & (date.day > 1)): # 새 월이 시작되면 계산 시작 (1주차: 첫 번째 목요일이 있는 주)
+            # 해당 날짜가 만기일인 경우 바로 저장 후 종료
+            if (cut == 2) & (weekday == 3):
+                year = date.year
+                month = date.month
+
+                maturity = date.date()  # datetime.date(yyyy, mm, dd)
+                maturity_list.append(maturity)
+                break
+
+            if (weekday <= 3) or ((weekday == 4) & (cut == 0)): # 새 월이 시작되면 계산 시작 (1주차: 첫 번째 목요일이 있는 주)
                 year = date.year
                 month = date.month
                 yearweek = date.isocalendar().week  # 기준 주차
                 
                 # 1주차에 장이 열리지 않은 경우의 예외 처리
-                if date.day > 7:
+                if (date.day >= 5) & (weekday <= 3):
                     check_week = dates[(dates.year == year) & (dates.isocalendar().week == yearweek)]   # 월의 2주차
                 
                 # 1주차에 장이 열린 경우
