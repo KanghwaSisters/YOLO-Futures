@@ -81,8 +81,7 @@ class Account:
         initial_margin = market_pt * size * self.initial_margin_rate * self.contract_unit
 
         # 계약 추가
-        for _ in range(size):
-            self.open_interest_list.append(market_pt)
+        self.open_interest_list.extend([market_pt for _ in range(size)])
         self.current_name_value += name_value
         self.execution_strength += size
 
@@ -112,7 +111,7 @@ class Account:
 
         else:   # 일부 청산
             settle_contract = self.open_interest_list[:size]
-            settle_value = sum(settle_contract)
+            settle_value = sum(np.abs(settle_contract))
             pnl = self._get_pnl(market_pt, size) * self.contract_unit
             settle_initial_margin = settle_value * self.initial_margin_rate * self.contract_unit
 
@@ -127,7 +126,7 @@ class Account:
 
             # 실현 손익
             net_pnl = pnl - cost
-            self.prev_realized_pnl = self.realized_pnl
+            # self.prev_realized_pnl = self.realized_pnl
             self.realized_pnl += net_pnl
 
             # 계좌 변동
@@ -158,7 +157,7 @@ class Account:
         self.maintenance_margin = 0
 
         # 실현 손익
-        self.prev_realized_pnl = self.realized_pnl
+        # self.prev_realized_pnl = self.realized_pnl
         self.realized_pnl += net_pnl
 
         # 계좌 변동
@@ -187,7 +186,7 @@ class Account:
             self.prev_unrealized_pnl = self.unrealized_pnl
 
             # 미실현 손익 -> 실현 손익 전환
-            self.prev_realized_pnl = self.realized_pnl
+            # self.prev_realized_pnl = self.realized_pnl
             self.realized_pnl += daily_settle
             self.unrealized_pnl = 0
 
@@ -197,7 +196,7 @@ class Account:
         '''
         if self.execution_strength != 0:
             self.average_entry = np.mean(self.open_interest_list)  # 평균 진입가
-            self.maintenance_margin = sum(self.open_interest_list) * self.maintenance_margin_rate * self.contract_unit
+            self.maintenance_margin = np.sum(self.open_interest_list) * self.maintenance_margin_rate * self.contract_unit
             self.unrealized_pnl = self._get_pnl(market_pt, self.execution_strength) * self.contract_unit
         else:
             self.average_entry = 0

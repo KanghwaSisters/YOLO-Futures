@@ -19,7 +19,7 @@ CONFIG = EasyDict({
     'GAMMA': 0.99,
     'LR': 1e-3,
     'VALUE_COEFF': 0.5,
-    'ENTROPY_COEFF': 0.01,
+    'ENTROPY_COEFF': 0.05,
     'CLIP_EPS': 0.2,
     'BATCH_SIZE': 32,
     'EPOCH': 10,
@@ -47,5 +47,5 @@ CONFIG = EasyDict({
     'REWARD_FTN': None,  # 외부에서 정의
     'DONE_FTN': None,    # 외부에서 정의
     'SCALER': None,      # 외부에서 정의
-    'PATH': '/Users/ijimin/Documents/GitHub/YOLO-Futures/logs/test5',
+    'PATH': '/Users/ijimin/Documents/GitHub/YOLO-Futures/logs/test6',
 })
