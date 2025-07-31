@@ -65,9 +65,14 @@ class NonEpisodicTrainer:
         self.v_path = path + "/" + "visualization"
         self.m_path = path + "/" + "models"
 
+
         ensure_dir(self.path)
         ensure_dir(self.v_path)
         ensure_dir(self.m_path)
+
+        self.log_file = os.path.join(self.path, "train_log.txt")
+        with open(self.log_file, "w") as f:
+            f.write("==== Training Log Start ====\n")
 
     def train_visualization(self):
         fig, ax = plt.subplots(nrows=2, ncols=1, figsize=(18, 6))
@@ -85,20 +90,20 @@ class NonEpisodicTrainer:
         path = self.v_path + '/' + f'I{self.dataset_flag}FT'
 
         plt.savefig(path)
-        print(f"✅ 시각화 저장 완료: {path}")
+        self.log(f"✅ 시각화 저장 완료: {path}")
 
     def __call__(self):
         for idx, (train_interval, valid_interval) in enumerate(self.train_valid_timestep):
-            print(f"== [{idx}] interval training ===========================")
+            self.log(f"== [{idx}] interval training ===========================")
             self.dataset_flag = idx
 
             self.train_env, self.valid_env = self.set_env(train_interval, valid_interval)
 
-            print(f">>>> Train : {train_interval}")
+            self.log(f">>>> Train : {train_interval}")
             self.train(self.train_env, self.agent)
             self.train_visualization()
 
-            print(f">>>> Valid : {valid_interval}")
+            self.log(f">>>> Valid : {valid_interval}")
 
             models = {'latest model' : self.latest_model, 
                       'highest reward' : self.reward_king_model, 
@@ -192,7 +197,7 @@ class NonEpisodicTrainer:
 
         plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.savefig(path)
-        print(f"✅ 시각화 저장 완료 (학습 상태 포함): {path}")
+        self.log(f"✅ 시각화 저장 완료 (학습 상태 포함): {path}")
         
         # 메모리 정리
         plt.close(fig)
@@ -322,14 +327,16 @@ class NonEpisodicTrainer:
 
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
-            if loss != None:
-                print(f"[{self.dataset_flag}|Train] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Loss: {loss:6.3f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
+            if (loss != None) & ((episode+1) % 100 == 0):
+                self.log(f"[{self.dataset_flag}|Train] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Loss: {loss:6.3f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
             
-            if (episode+1) % 50 == 0:
+            if (episode+1) % 500 == 0:
                 print(env)
+                self.log(env.__str__())
 
             if env.info == 'bankrupt':
-                print(env)
+                # print(env)
+                self.log(env.__str__())
                 self.durations.append(maintained_steps)
                 n_bankruptcy += 1
                 maintained_steps = 0
@@ -343,7 +350,7 @@ class NonEpisodicTrainer:
                 path = self.v_path + '/' + f'I{n_bankruptcy}T'
 
                 plt.savefig(path)
-                print(f"✅ 시각화 저장 완료: {path}")
+                self.log(f"✅ 시각화 저장 완료: {path}")
                 # plt.show()
 
                 self.pnls = []
@@ -357,14 +364,14 @@ class NonEpisodicTrainer:
         self.train_rewards_history.extend(interval_rewards)
         self.train_losses_history.extend(interval_losses)
 
-        print(f"\n== [Train 결과 요약: Interval {self.dataset_flag}] ==============================")
-        print(f"  - 총 에피소드 수: {episode}")
-        print(f"  - 최대 보상: {max_ep_reward:.2f}")
-        print(f"  - 최종 평균 보상: {np.mean(episode_rewards):.2f}")
-        print(f"  - 파산 횟수: {n_bankruptcy}")
-        print(f"  - 파산 전 평균 유지 스텝 수: {np.mean(self.durations[-episode:])}")
-        print(f"  - 모델 저장 간격 (10)")
-        print("============================================================\n")
+        self.log(f"\n== [Train 결과 요약: Interval {self.dataset_flag}] ==============================")
+        self.log(f"  - 총 에피소드 수: {episode}")
+        self.log(f"  - 최대 보상: {max_ep_reward:.2f}")
+        self.log(f"  - 최종 평균 보상: {np.mean(episode_rewards):.2f}")
+        self.log(f"  - 파산 횟수: {n_bankruptcy}")
+        self.log(f"  - 파산 전 평균 유지 스텝 수: {np.mean(self.durations[-episode:])}")
+        self.log(f"  - 모델 저장 간격 (10)")
+        self.log("============================================================\n")
 
     def valid(self, env, agent, model_name, state_dict):
 
@@ -444,23 +451,28 @@ class NonEpisodicTrainer:
                 durations.append(maintained_steps)
                 n_bankruptcy += 1
                 maintained_steps = 0
+                # 초기화 
                 env.account.reset()
+                env.performance_tracker.reset()
+                env.risk_metrics.reset()
+
                 pnls = []
                 contract_history = []
 
-            print(f"[{self.dataset_flag}|Valid] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
+            self.log(f"[{self.dataset_flag}|Valid] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
 
             if (episode+1) % 50 == 0:
                 print(env)
+                self.log(env.__str__())
 
             episode += 1
 
-        print(f"\n==[Valid 결과 요약:Interval{self.dataset_flag}] ==============================")
-        print(f"  - 총 에피소드 수: {episode}")
-        print(f"  - 평균 보상: {np.mean(episode_rewards):.2f}")
-        print(f"  - 마지막 수익: {asset_history[-1]:.2f}")
-        print(f"  - 최종 총 자산: {equity_history[-1]:.2f}")  # 새로 추가
-        print("============================================================\n")
+        self.log(f"\n==[Valid 결과 요약:Interval{self.dataset_flag}] ==============================")
+        self.log(f"  - 총 에피소드 수: {episode}")
+        self.log(f"  - 평균 보상: {np.mean(episode_rewards):.2f}")
+        self.log(f"  - 마지막 수익: {asset_history[-1]:.2f}")
+        self.log(f"  - 최종 총 자산: {equity_history[-1]:.2f}")  # 새로 추가
+        self.log("============================================================\n")
 
         return episode_rewards, env_execution_strengths, pnls, asset_history, actions,equity_history, contract_history
 
@@ -468,18 +480,18 @@ class NonEpisodicTrainer:
         # 가장 최근 모델 저장
         if self.latest_model is not None:
             torch.save(self.latest_model, os.path.join(path, f'I{self.dataset_flag+1}latest.pth'))
-            print("[Saved] latest_model")
+            self.log("[Saved] latest_model")
 
         # 최고 보상 모델 저장
         if self.reward_king_model is not None:
             torch.save(self.reward_king_model, os.path.join(path, f'I{self.dataset_flag+1}bestreward.pth'))
-            print("[Saved] reward_king_model")
+            self.log("[Saved] reward_king_model")
 
         # n-step마다 모델 저장 
         recent_models = list(self.models_per_steps)
         for idx, model_state in enumerate(recent_models):
             torch.save(model_state, os.path.join(path, f'I{self.dataset_flag+1}_{(idx+1)}steps.pth'))
-        print(f"[Saved] {len(recent_models)} recent models")
+        self.log(f"[Saved] {len(recent_models)} recent models")
 
     def save(self, CONFIG):
 
@@ -496,7 +508,7 @@ class NonEpisodicTrainer:
         with open(save_path, "w") as f:
             f.write(config_str)
 
-        print(f"✅ 설정 저장 완료: {save_path}")
+        self.log(f"✅ 설정 저장 완료: {save_path}")
 
 
     def split_position_strength(self, action):
@@ -506,3 +518,7 @@ class NonEpisodicTrainer:
         strength = np.abs(action)
         position = np.sign(action)
         return position.item(), strength.item()
+    
+    def log(self, message):
+        with open(self.log_file, "a") as f:
+            f.write(message + "\n")

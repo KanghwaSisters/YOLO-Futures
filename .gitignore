@@ -2,3 +2,5 @@ logs/
 __pycache__/
 *.csv
 *.pkl
+Anaconda3-2024.10-1-Linux-x86_64.sh
+miniconda.sh

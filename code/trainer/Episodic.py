@@ -36,7 +36,7 @@ class EpisodicTrainer(NonEpisodicTrainer):
 
         if self.remaining_n > 0 and env.info in ['bankrupt']:
                 self.remaining_n -= 1
-                print(f">>>>> reset the env : {env.info} occured. Go Back To Start.")
+                self.log(f">>>>> reset the env : {env.info} occured. Go Back To Start.")
                 return env.reset()
             
         elif env.next_state == None:

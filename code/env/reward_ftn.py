@@ -105,7 +105,7 @@ def risk_adjusted_pnl_reward(alpha=1.0,
     reward = (beta*delta_unrealized_pnl + alpha*net_realized_pnl + realized_bonus) / scaling_factor
     
     # 
-    reward = np.tanh(reward)
+    # reward = np.tanh(reward)
 
         
     # 정규화 
@@ -133,7 +133,7 @@ def risk_adjusted_pnl_reward(alpha=1.0,
     elif env_info == 'risk_limits':
         reward += risk_penalty
 
-    return reward 
+    return np.tanh(reward)
 
 
 def pnl_change_based_reward(margin_call_penalty=-10.0, 

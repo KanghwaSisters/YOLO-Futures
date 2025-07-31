@@ -379,6 +379,10 @@ class FuturesEnvironment:
 
         if self.info == 'done':
             self.account.daily_settlement(current_price)
+
+        # 성과 지표 
+        perf = self.get_performance_summary() # 'cost_ratio', 'market_regime', 'volatility_regime'
+
         
         # 11. 보상 계산
         reward = self.get_reward(
@@ -405,7 +409,9 @@ class FuturesEnvironment:
             realized_pnl=self.account.realized_pnl / self.account.contract_unit ,                       # (pt)
             unrealized_pnl=self.account.unrealized_pnl / self.account.contract_unit ,                   # (pt)
             available_balance=self.account.available_balance / self.account.contract_unit,              # (pt)
-            total_transaction_costs=self.account.total_transaction_costs / self.account.contract_unit   # (pt)
+            cost_ratio=perf['cost_ratio'],
+            market_regime=perf['market_regime'],
+            volatility_regime=perf['volatility_regime']
         )
 
         # 12. action space에 대한 마스크 생성 
@@ -516,11 +522,13 @@ class FuturesEnvironment:
             fixed_state,
             current_position=self.account.current_position,
             execution_strength=self.account.execution_strength,
-            n_days_before_ma=self._get_n_days_before_maturity(self.current_timestep),                   # int
-            realized_pnl=self.account.realized_pnl / self.account.contract_unit,                        # (pt)
-            unrealized_pnl=self.account.unrealized_pnl / self.account.contract_unit,                    # (pt)
+            n_days_before_ma=self._get_n_days_before_maturity(self.current_timestep),
+            realized_pnl=self.account.realized_pnl / self.account.contract_unit ,                       # (pt)
+            unrealized_pnl=self.account.unrealized_pnl / self.account.contract_unit ,                   # (pt)
             available_balance=self.account.available_balance / self.account.contract_unit,              # (pt)
-            total_transaction_costs=self.account.total_transaction_costs / self.account.contract_unit   # (pt)
+            cost_ratio=0,
+            market_regime=0,
+            volatility_regime=0
         )
         
         return initial_state
