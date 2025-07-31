@@ -64,6 +64,9 @@ class HorizonBoundEnv:
         self.current_timestep = self.dataset[0][-1]
         self.start_budget = start_budget
         
+        # 만기일 계산
+        mask = self._full_df.index >= pd.to_datetime(self._date_range[0])
+        dates = self._full_df.loc[mask].index.normalize().unique()
         # ===== 기존 코드 호환성을 위한 속성 추가 =====
         # current info 
         # -[ type of info ]-------------------------------------
