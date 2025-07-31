@@ -61,6 +61,9 @@ class FuturesEnvironment:
         self.contract_unit = 50000  # 미니 선물 계약 단위
         self.current_timestep = date_range[0]
         
+        # 만기일 계산
+        mask = self._full_df.index >= pd.to_datetime(self._date_range[0])
+        dates = self._full_df.loc[mask].index.normalize().unique()
         # ===== 기존 코드 호환성을 위한 속성 추가 =====
         # current info 
         # -[ type of info ]-------------------------------------
