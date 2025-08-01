@@ -93,6 +93,9 @@ class NonEpisodicTrainer:
         self.log(f"✅ 시각화 저장 완료: {path}")
 
     def __call__(self):
+
+        start_time = time.time()
+
         for idx, (train_interval, valid_interval) in enumerate(self.train_valid_timestep):
             self.log(f"== [{idx}] interval training ===========================")
             self.dataset_flag = idx
@@ -145,6 +148,8 @@ class NonEpisodicTrainer:
 
             self.plot_all_validation_graphs(valid_data, self.v_path)
             self.save_model_to(self.m_path)
+
+        self.time_is(start_time, 'Total')
 
     def plot_all_validation_graphs(self, valid_data, save_path):
         
@@ -232,6 +237,9 @@ class NonEpisodicTrainer:
         return state if env.next_state is None else env.conti()
 
     def train(self, env, agent):
+        
+        start_time = time.time()
+
         episode_rewards = []
         moving_avg_rewards = deque(maxlen=self.ma_interval)
         episode_execution_strengths = deque(maxlen=self.n_steps)
@@ -373,7 +381,11 @@ class NonEpisodicTrainer:
         self.log(f"  - 모델 저장 간격 (10)")
         self.log("============================================================\n")
 
+        self.time_is(start_time, f'Train:I{self.dataset_flag}')
+
     def valid(self, env, agent, model_name, state_dict):
+
+        start_time = time.time()
 
         agent.load_model(state_dict)
 
@@ -467,12 +479,14 @@ class NonEpisodicTrainer:
 
             episode += 1
 
-        self.log(f"\n==[Valid 결과 요약:Interval{self.dataset_flag}] ==============================")
+        self.log(f"\n==[Valid 결과 요약:Interval{self.dataset_flag},{model_name}] ==============================")
         self.log(f"  - 총 에피소드 수: {episode}")
         self.log(f"  - 평균 보상: {np.mean(episode_rewards):.2f}")
         self.log(f"  - 마지막 수익: {asset_history[-1]:.2f}")
         self.log(f"  - 최종 총 자산: {equity_history[-1]:.2f}")  # 새로 추가
         self.log("============================================================\n")
+
+        self.time_is(start_time, f'Valid:{model_name}')
 
         return episode_rewards, env_execution_strengths, pnls, asset_history, actions,equity_history, contract_history
 
@@ -522,3 +536,15 @@ class NonEpisodicTrainer:
     def log(self, message):
         with open(self.log_file, "a") as f:
             f.write(message + "\n")
+
+    def time_is(self, start_time, status):
+        elapsed_time = time.time() - start_time
+        hours, rem = divmod(elapsed_time, 3600)
+        minutes, seconds = divmod(rem, 60)
+
+        message = f"⏱️ {status} 시간 소요: {int(hours)}시간 {int(minutes)}분 {int(seconds)}초\n"
+
+        print(message)
+        self.log(message)
+
+    
