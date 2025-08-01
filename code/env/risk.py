@@ -3,10 +3,11 @@ from typing import Dict, List, Optional
 from dataclasses import dataclass
 from enum import Enum
 
+# 시장 상태 구분 Enum (강세장, 약세장, 횡보장)
 class MarketRegime(Enum):
-    BULL = 1
-    BEAR = -1
-    SIDEWAYS = 0
+    BULL = 1        # 강세장 : 최근 저점 대비 20% 이상 상승 
+    BEAR = -1       # 약세장 : 최근 고점 대비 20% 이상 하락 
+    SIDEWAYS = 0    # 횡보장 : etc
 
 @dataclass
 class TradeRecord:
@@ -31,16 +32,16 @@ class MarketStateManager:
         
     def update_market_regime(self, price_data: np.ndarray):
         """가격 데이터를 바탕으로 시장 상태 갱신"""
-        if len(price_data) < 20:
+        if len(price_data) < 80:
             return
         
         short_ma = np.mean(price_data[-5:])
-        long_ma = np.mean(price_data[-20:])
+        long_ma = np.mean(price_data[-80:])
         
         # 트렌드 방향 판단 (2% 임계값)
-        if short_ma > long_ma * 1.02:
+        if short_ma > long_ma * 1.003:
             self.market_regime = MarketRegime.BULL
-        elif short_ma < long_ma * 0.98:
+        elif short_ma < long_ma * 0.997:
             self.market_regime = MarketRegime.BEAR
         else:
             self.market_regime = MarketRegime.SIDEWAYS

@@ -414,8 +414,8 @@ class FuturesEnvironment:
             unrealized_pnl=self.account.unrealized_pnl / self.account.contract_unit ,                   # (pt)
             available_balance=self.account.available_balance / self.account.contract_unit,              # (pt)
             cost_ratio=perf['cost_ratio'],
-            market_regime=perf['market_regime'],
-            volatility_regime=perf['volatility_regime']
+            market_regime=perf['market_regime']
+            # volatility_regime=perf['volatility_regime']
         )
 
         # 12. action space에 대한 마스크 생성 
@@ -534,8 +534,8 @@ class FuturesEnvironment:
             unrealized_pnl=self.account.unrealized_pnl / self.account.contract_unit ,                   # (pt)
             available_balance=self.account.available_balance / self.account.contract_unit,              # (pt)
             cost_ratio=0,
-            market_regime=0,
-            volatility_regime=0
+            market_regime=0
+            # volatility_regime=0
         )
         
         return initial_state
