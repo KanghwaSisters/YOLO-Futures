@@ -307,7 +307,7 @@ class NonEpisodicTrainer:
                 ep_execution_strength += execution_strength
 
                 # 지표 저장 
-                self.pnls.append((env.account.unrealized_pnl, env.account.realized_pnl - env.account.prev_realized_pnl))
+                self.pnls.append((env.account.unrealized_pnl, env.account.net_realized_pnl))
 
             # update
             maintained_steps += ep_len
@@ -440,7 +440,7 @@ class NonEpisodicTrainer:
                 ep_n_positions[current_position] += 1
                 ep_execution_strength += execution_strength
 
-                pnls.append((env.account.unrealized_pnl, env.account.realized_pnl - env.account.prev_realized_pnl))
+                pnls.append((env.account.unrealized_pnl, env.account.net_realized_pnl))
                 env_execution_strengths.append(env.account.execution_strength)
                 asset_history.append(env.account.realized_pnl)
                 actions.append(action)

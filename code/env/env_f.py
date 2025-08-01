@@ -159,8 +159,8 @@ class FuturesEnvironment:
 
         # 현재 체결된 계약에서 반대 포지션을 취함 
         reversed_execution = -self.account.execution_strength * self.account.current_position
-        net_pnl, cost = self.account.settle_total_contract(market_pt=current_price) # self.account.step(reversed_execution, self.previous_price, self.current_timestep)
-        # prev 맞는 지 고민하기 
+        net_pnl, cost = self.account.step(reversed_execution, current_price, self.current_timestep) # self.account.settle_total_contract(market_pt=current_price) 
+
         return net_pnl, cost, reversed_execution
     
     def _get_market_features(self) -> Dict[str, float]:
@@ -276,6 +276,10 @@ class FuturesEnvironment:
     
     def step(self, action: int) -> Tuple[Any, float, bool]:
         """환경 스텝 실행"""
+        # 0. 초기화 
+        self.account.net_realized_pnl = 0
+        self.account.net_realized_pnl_without_cost = 0
+
         # 1. 다음 데이터 가져오기
         next_fixed_state, close_price, next_timestep = next(self.data_iterator)
         current_price = close_price
@@ -421,6 +425,9 @@ class FuturesEnvironment:
         self.next_state = next_state
         self.previous_price = current_price
         self.current_timestep = next_timestep
+
+        self.account.net_realized_pnl = net_realized_pnl
+        self.account.net_realized_pnl_without_cost = net_realized_pnl + cost
 
         return next_state, reward, done
     
