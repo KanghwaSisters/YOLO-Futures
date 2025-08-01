@@ -1,4 +1,5 @@
 import copy
+import time
 import torch
 from collections import deque  
 import matplotlib.pyplot as plt
@@ -87,7 +88,7 @@ class NonEpisodicTrainer:
         else:
             ax[1].axis('off')
 
-        path = self.v_path + '/' + f'I{self.dataset_flag}FT'
+        path = self.v_path + '/' + f'TFI{self.dataset_flag}'
 
         plt.savefig(path)
         self.log(f"✅ 시각화 저장 완료: {path}")
@@ -153,7 +154,7 @@ class NonEpisodicTrainer:
 
     def plot_all_validation_graphs(self, valid_data, save_path):
         
-        path = save_path + '/' + f'I{self.dataset_flag}V'
+        path = save_path + '/' + f'VI{self.dataset_flag}'
 
         timesteps = valid_data['timesteps']
         market = valid_data['market']
@@ -349,13 +350,15 @@ class NonEpisodicTrainer:
                 n_bankruptcy += 1
                 maintained_steps = 0
                 env.account.reset()
+                env.performance_tracker.reset()
+                env.risk_metrics.reset()
                 
                 # 시각화 
                 _, ax = plt.subplots(figsize=(12,6))
                 plot_both_pnl_ticks(ax, list(range(len(self.pnls))), self.pnls)
                 plt.tight_layout()
 
-                path = self.v_path + '/' + f'I{n_bankruptcy}T'
+                path = self.v_path + '/' + f'T{self.dataset_flag}I{n_bankruptcy}'
 
                 plt.savefig(path)
                 self.log(f"✅ 시각화 저장 완료: {path}")
