@@ -79,18 +79,17 @@ def reward_combined_pnl_sharpe(**kwargs):
     return float(combined_reward)
 
 def risk_adjusted_pnl_reward(alpha=1.0,
-                             beta=0,
-                             gamma=0.3,
-                             position_change_penalty=-0.01, 
-                             margin_call_penalty=-1.0, 
+                             beta=0.1,
+                             bonus_scale=0.5,
+                             position_change_penalty=-0.01,
+                             margin_call_penalty=-1.5,
                              maturity_date_penalty=-0.5,
-                             bankrupt_penalty=-3.0, 
-                             insufficient_penalty=-0.5,
+                             bankrupt_penalty=-3.0,
+                             insufficient_penalty=-1.0,
                              risk_penalty=-1.0,
-                             scaling_factor = 10_000,
+                             scaling_factor=10_000,
                              env_info='',
-                             **kwargs
-                        ):
+                             **kwargs):
     
     # 1. 미실현 손익의 변화량 
     delta_unrealized_pnl = (kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']) 
@@ -98,17 +97,12 @@ def risk_adjusted_pnl_reward(alpha=1.0,
     # 2. 순실현 손익
     net_realized_pnl = kwargs['net_realized_pnl'] 
 
-    # 순실현 손익으로 수익을 얻으면 추가 보상 지급 
-    realized_bonus = gamma * net_realized_pnl if net_realized_pnl > 0 else 0
-
     # 3. 실현 손익과 미실현 손익을 더한 reward
     reward = (beta*delta_unrealized_pnl + alpha*net_realized_pnl + realized_bonus) / scaling_factor
-    
-    # 
-    # reward = np.tanh(reward)
 
-        
-    # 정규화 
+    # 포지션 청산 시점일 경우
+    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+        reward += (kwargs['equity'] - kwargs['initial_budget']) / kwargs['initial_budget'] * bonus_scale
 
     # # 4. 포지션 변경 시 패널티 부여 
     # delta_position = kwargs['current_position'] * kwargs['prev_position']
