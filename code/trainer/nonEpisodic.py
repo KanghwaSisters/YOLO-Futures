@@ -14,7 +14,7 @@ class NonEpisodicTrainer:
     def __init__(self, df, env, train_valid_timestep, window_size, state, reward_ftn, done_ftn, start_budget, scaler, position_cap, # env 관련 파라미터 
                  agent, model, optimizer, device,  # agent 관련 파라미터 
                  n_steps, ma_interval, save_interval,
-                 path
+                 path, print_log_interval, print_env_log_interval, save_visual_log=False
                  ):
         
         # dataframe 
@@ -42,6 +42,9 @@ class NonEpisodicTrainer:
         self.n_steps = n_steps
         self.ma_interval = ma_interval
         self.save_interval = save_interval
+        self.print_log_interval = print_log_interval
+        self.print_env_log_interval = print_env_log_interval
+        self.save_visual_log = save_visual_log
 
         # flag 
         self.n_reset_init_budget = 0
@@ -300,7 +303,8 @@ class NonEpisodicTrainer:
                     torch.tensor([mask], dtype=torch.bool)
                 ])
 
-                # update step 지표 
+                # update step 지표
+                env.maintained_steps += 1 
                 state = next_state
                 ep_reward += reward
                 ep_len += 1
@@ -336,10 +340,10 @@ class NonEpisodicTrainer:
 
             action_prop = (ep_n_positions / sum(ep_n_positions) * 100).round(0)
 
-            if (loss != None) & ((episode+1) % 100 == 0):
+            if (loss != None) & ((episode+1) % self.print_log_interval == 0):
                 self.log(f"[{self.dataset_flag}|Train] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Loss: {loss:6.3f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
             
-            if (episode+1) % 500 == 0:
+            if (episode+1) % self.print_env_log_interval == 0:
                 print(env)
                 self.log(env.__str__())
 
@@ -354,15 +358,15 @@ class NonEpisodicTrainer:
                 env.risk_metrics.reset()
                 
                 # 시각화 
-                _, ax = plt.subplots(figsize=(12,6))
-                plot_both_pnl_ticks(ax, list(range(len(self.pnls))), self.pnls)
-                plt.tight_layout()
+                if self.save_visual_log:
+                    _, ax = plt.subplots(figsize=(12,6))
+                    plot_both_pnl_ticks(ax, list(range(len(self.pnls))), self.pnls)
+                    plt.tight_layout()
 
-                path = self.v_path + '/' + f'T{self.dataset_flag}I{n_bankruptcy}'
+                    path = self.v_path + '/' + f'T{self.dataset_flag}I{n_bankruptcy}'
 
-                plt.savefig(path)
-                self.log(f"✅ 시각화 저장 완료: {path}")
-                # plt.show()
+                    plt.savefig(path)
+                    self.log(f"✅ 시각화 저장 완료: {path}")
 
                 self.pnls = []
 
@@ -476,7 +480,7 @@ class NonEpisodicTrainer:
 
             self.log(f"[{self.dataset_flag}|Valid] Ep {episode+1:03d} | info: {env.info} | Maintained for: {maintained_steps} | Reward: {ep_reward:4.0f} | Pos(short/hold/long): {int(action_prop[-1])}% / {int(action_prop[0])}% / {int(action_prop[1])}% | Strength: {ep_execution_strength / max(ep_len,1):.2f} |")
 
-            if (episode+1) % 50 == 0:
+            if (episode+1) % self.print_env_log_interval == 0:
                 print(env)
                 self.log(env.__str__())
 

@@ -102,6 +102,7 @@ class FuturesEnvironment:
         # 성과 추적용 리스트
         self.daily_returns = []
         self.trade_history = []
+        self.maintained_steps = 0
 
     def _get_n_days_before_maturity(self, current_timestep):
         current_day = current_timestep.date()
@@ -401,7 +402,9 @@ class FuturesEnvironment:
             realized_pnl=net_realized_pnl,
             prev_position=self.account.prev_position,
             current_position=self.account.current_position,
-            execution_strength=self.account.execution_strength
+            execution_strength=self.account.execution_strength,
+            equity=self.account.available_balance,
+            initial_budget=self.account.initial_budget
         )
         
         # 12. 다음 상태 생성
@@ -495,6 +498,7 @@ class FuturesEnvironment:
         
         # 3. 환경 상태 초기화
         self.info = ''
+        self.maintained_steps = 0
         self.mask = [1] * self.n_actions
         
         # 4. 데이터 이터레이터 재설정
@@ -552,7 +556,9 @@ class FuturesEnvironment:
     def __str__(self):
         """환경 상태 및 주요 성과 출력"""
         perf = self.get_performance_summary()
-        
+
+        maintain = f"===============================================\n"
+        maintain += f"✋  Maintained        : {self.maintained_steps}\n"
         # 계좌 상태
         account_status = str(self.account)
         
@@ -590,7 +596,7 @@ class FuturesEnvironment:
             f"===============================================\n"
         )
         
-        return account_status + performance_section + trade_history_section + market_conditions_section
+        return maintain + account_status + performance_section + trade_history_section + market_conditions_section
     
     def get_detailed_status(self):
         """상세한 환경 상태 출력"""

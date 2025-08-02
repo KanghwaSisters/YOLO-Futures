@@ -5,9 +5,9 @@ from enum import Enum
 
 # 시장 상태 구분 Enum (강세장, 약세장, 횡보장)
 class MarketRegime(Enum):
-    BULL = 1        # 강세장 : 최근 저점 대비 20% 이상 상승 
-    BEAR = -1       # 약세장 : 최근 고점 대비 20% 이상 하락 
-    SIDEWAYS = 0    # 횡보장 : etc
+    BULL = 1        # 강세장
+    BEAR = -1       # 약세장
+    SIDEWAYS = 0    # 횡보장
 
 @dataclass
 class TradeRecord:
@@ -38,10 +38,12 @@ class MarketStateManager:
         short_ma = np.mean(price_data[-5:])
         long_ma = np.mean(price_data[-80:])
         
-        # 트렌드 방향 판단 (2% 임계값)
-        if short_ma > long_ma * 1.003:
+        # 트렌드 방향 판단 
+        threshold = 0.003
+        
+        if short_ma > long_ma * (1+threshold):
             self.market_regime = MarketRegime.BULL
-        elif short_ma < long_ma * 0.997:
+        elif short_ma < long_ma * (1-threshold):
             self.market_regime = MarketRegime.BEAR
         else:
             self.market_regime = MarketRegime.SIDEWAYS
