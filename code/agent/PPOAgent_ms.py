@@ -1,4 +1,5 @@
 import torch
+import torch.nn as nn
 import random
 import torch.nn.functional as F
 import torch.optim as optim
@@ -72,6 +73,7 @@ class PPOAgent:
         # train related 
         self.lr = lr
         self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+        self.critic_loss_ftn = nn.MSELoss()
         self.epoch = epoch
         self.batch_size = batch_size
 
@@ -92,16 +94,6 @@ class PPOAgent:
         if mask is not None:
             mask = torch.tensor(mask, dtype=torch.bool).unsqueeze(0).to(self.device)
             logits = logits.masked_fill(mask == 0, float('-inf'))
-
-            # try:
-            #     logits = logits.masked_fill(mask == 0, float('-inf'))
-            
-            # except RuntimeError as e:      
-            #     print(mask.shape)
-            #     print(logits.shape)
-            #     raise e
-        
-        
 
         # entropy bonus 
         action_dist = Categorical(logits=logits)
@@ -177,7 +169,7 @@ class PPOAgent:
 
         return torch.tensor(advantage, dtype=torch.float32).unsqueeze(1)
     
-    def get_max_power2_batch_size(self, len_data, min_n=4, max_n=9):
+    def _get_max_power2_batch_size(self, len_data, min_n=4, max_n=9):
         """
         len_data 이하에서 사용할 수 있는 최대 2^n 배치 크기를 반환.
         예: len_data=90 → 64 반환 (2^6)
@@ -191,7 +183,7 @@ class PPOAgent:
     
     def sample_memory(self, memory, advantage):
         # actual batch size
-        # actual_batch_size = self.get_max_power2_batch_size(len(memory))
+        # actual_batch_size = self._get_max_power2_batch_size(len(memory))
 
         # sampling from raw data 
         indices = random.sample(range(len(memory)), self.batch_size)
@@ -237,7 +229,7 @@ class PPOAgent:
           (1) value loss, (2) clipped surrogate loss, (3) entropy bonus
         - GAE로 계산된 advantage를 기반으로 policy와 value를 모두 학습한다.
         '''
-        if len(memory) < 16:
+        if len(memory) < self.batch_size:
             return
         
         losses = 0
@@ -264,7 +256,7 @@ class PPOAgent:
                 _, next_values = self.model(next_states)
                 value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
-            value_loss = F.mse_loss(values.squeeze(), value_target.detach())
+            value_loss = self.critic_loss_ftn(values.squeeze(), value_target.detach())
             clip_loss = self.clip_loss_ftn(advantages, old_log_probs.exp(), current_probs)
             entropy = action_dist.entropy().mean()
 
@@ -285,3 +277,58 @@ class PPOAgent:
 
     def set_optimizer(self, new_optimizer):
         self.optimizer = new_optimizer(self.model.parameters(), lr=self.lr)
+
+class DecoupledPPOAgent(PPOAgent):
+    def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, device, lam=0.98):
+        super().__init__(action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, device, lam)
+
+        shared_params = list(self.model.shared.parameters())
+        actor_params = list(self.model.actor.parameters())
+        critic_params = list(self.model.critic.parameters())
+
+        self.actor_optimizer = torch.optim.Adam(shared_params + actor_params, lr=self.lr)
+        self.critic_optimizer = torch.optim.Adam(shared_params + critic_params, lr=self.lr)
+
+    def train(self, memory, advantage):
+        if len(memory) < self.batch_size:
+            return
+
+        total_loss_sum = 0.0
+
+        for _ in range(self.epoch):
+            states, actions, rewards, next_states, dones, old_log_probs, advantages, masks = self.sample_memory(memory, advantage)
+
+            self.model.train()
+            current_logits, values = self.model(states)
+
+            if masks is not None:
+                current_logits = current_logits.masked_fill(masks == 0, float('-inf'))
+
+            action_dist = Categorical(logits=current_logits)
+            current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
+            current_probs = current_log_probs.exp()
+
+            with torch.no_grad():
+                _, next_values = self.model(next_states)
+                value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
+
+            # Critic loss (MSE)
+            critic_loss = self.value_coeff * self.critic_loss_ftn(values.squeeze(), value_target.detach())
+
+            # Actor loss (clipped PPO surrogate)
+            clip_loss = self.clip_loss_ftn(advantages, old_log_probs.exp(), current_probs)
+            entropy = action_dist.entropy().mean()
+            actor_loss = -clip_loss - self.entropy_coeff * entropy
+
+            # Sum loss for tracking
+            total_loss = actor_loss + critic_loss
+            total_loss_sum += total_loss.item()
+
+            # Backprop & update
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            total_loss.backward()
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+        return total_loss_sum / self.epoch
