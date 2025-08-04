@@ -77,7 +77,7 @@ class PPOAgent:
         self.epoch = epoch
         self.batch_size = batch_size
 
-    def get_action(self, state, mask=None):
+    def get_action(self, state, mask=None, stochastic=True):
         '''
         get_action(state: torch.Tensor) -> tuple[int, float]
 
@@ -95,13 +95,19 @@ class PPOAgent:
             mask = torch.tensor(mask, dtype=torch.bool).unsqueeze(0).to(self.device)
             logits = logits.masked_fill(mask == 0, float('-inf'))
 
-        # entropy bonus 
-        action_dist = Categorical(logits=logits)
-        _action = action_dist.sample()
-        log_prob = action_dist.log_prob(_action)
+        if stochastic:
+            # entropy bonus 
+            action_dist = Categorical(logits=logits)
+            _action = action_dist.sample()
+            log_prob = action_dist.log_prob(_action)
 
-        action = self.action_space[_action.item()]
-        return action, log_prob.item()
+            action = self.action_space[_action.item()]
+            return action, log_prob.item()
+        else:
+            _action = torch.argmax(logits, dim=-1)
+            action = self.action_space[_action.item()]
+            return action, None
+
 
     def clip_loss_ftn(self, advantage, old_prob, current_prob):
         '''
