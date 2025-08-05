@@ -80,6 +80,7 @@ def reward_combined_pnl_sharpe(**kwargs):
 
 def risk_adjusted_pnl_reward(alpha=1.0,
                              beta=0.1,
+                             gamma=0.3,
                              bonus_scale=0.5,
                              position_change_penalty=-0.01,
                              margin_call_penalty=-1.5,
@@ -96,9 +97,11 @@ def risk_adjusted_pnl_reward(alpha=1.0,
 
     # 2. 순실현 손익
     net_realized_pnl = kwargs['net_realized_pnl'] 
+    
+    realized_bonus = gamma * net_realized_pnl if net_realized_pnl > 0 else 0
 
     # 3. 실현 손익과 미실현 손익을 더한 reward
-    reward = (beta*delta_unrealized_pnl + alpha*net_realized_pnl + realized_bonus) / scaling_factor
+    reward = (beta*delta_unrealized_pnl + alpha*net_realized_pnl + realized_bonus ) / scaling_factor # + realized_bonus
 
     # 포지션 청산 시점일 경우
     if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
@@ -153,3 +156,47 @@ def pnl_change_based_reward(margin_call_penalty=-10.0,
         reward += maturity_date_penalty
 
     return reward
+
+
+
+def GOT_pnl_reward(alpha=1.0,
+                   beta=0.3,
+                   gamma=0.3,
+                   bonus_scale=0.5,
+                   position_change_penalty=-0.01,
+                   margin_call_penalty=-1.5,
+                   maturity_date_penalty=-0.5,
+                   bankrupt_penalty=-3.0,
+                   max_steps_penalty=-1.0,
+                   goal_reward_bonus=2.0,
+                   scaling_factor=10_000,
+                   env_info='',
+                   **kwargs):
+
+    delta_unrealized_pnl = kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']
+    net_realized_pnl = kwargs['net_realized_pnl']
+
+    realized_bonus = net_realized_pnl if net_realized_pnl > 0 else 0
+
+    # 3. 실현 손익과 미실현 손익을 더한 reward
+    # reward = (beta*delta_unrealized_pnl + alpha*net_realized_pnl + gamma*realized_bonus ) / scaling_factor # + realized_bonus
+
+    reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor
+
+    # 청산 시점 보너스
+    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+        reward += ((kwargs['equity'] - kwargs['initial_budget']) / kwargs['initial_budget']) * bonus_scale
+
+    # 환경 정보 기반 보너스/패널티
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+    elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
+        reward += maturity_date_penalty
+    # elif env_info == 'max_step':
+    #     reward += max_steps_penalty
+    elif env_info == 'goal_profit':
+        reward += goal_reward_bonus
+
+    return np.tanh(reward)
