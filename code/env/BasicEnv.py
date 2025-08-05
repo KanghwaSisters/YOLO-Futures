@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import bisect
 from typing import Dict, List, Tuple, Optional, Any
 
 from datahandler.dataset import *
@@ -60,15 +61,18 @@ class FuturesEnvironment:
         self.previous_price = None
         self.contract_unit = 50000  # 미니 선물 계약 단위
         self.current_timestep = date_range[0]
+        self.max_step = 5_000
         
         # 만기일 계산
         mask = self._full_df.index >= pd.to_datetime(self._date_range[0])
         dates = self._full_df.loc[mask].index.normalize().unique()
-
-        self.maturity_list = calculate_maturity(dates)
-        # print(self.maturity_list)
-        self.maturity_iter = iter(self.maturity_list)
-        self.latest_maturity_day = next(self.maturity_iter)
+        # 
+        maturity_list = calculate_maturity(dates)
+        self.maturity_list = pd.to_datetime(maturity_list)
+        # for t in self.maturity_list:
+        #     print(type(t), t)
+        # self.maturity_iter = iter(self.maturity_list)
+        # self.latest_maturity_day = next(self.maturity_iter)
         
         # === 계좌 및 거래 비용 설정 ===
         self.account = Account(start_budget, position_cap, self.current_timestep, 
@@ -104,14 +108,33 @@ class FuturesEnvironment:
         self.trade_history = []
         self.maintained_steps = 0
 
-    def _get_n_days_before_maturity(self, current_timestep):
-        current_day = current_timestep.date()
-
-        # 만약 만기일을 넘었다면, 다음 만기일로 이동 
-        if (self.latest_maturity_day - current_day).days <= -1:
-            self.latest_maturity_day = next(self.maturity_iter)
+    def _find_nearest_later_timestep(self, list_of_timesteps, target_time):
+        """
+        list_of_timesteps: 정렬된 pd.Timestamp 리스트
+        target_time: pd.Timestamp
+        """
+        list_of_timesteps = [pd.Timestamp(t) for t in list_of_timesteps]
+        target_time = pd.Timestamp(target_time)
         
-        return (self.latest_maturity_day - current_day).days
+        idx = bisect.bisect_left(list_of_timesteps, target_time)
+
+        if idx < len(list_of_timesteps):
+            return list_of_timesteps[idx]
+        else:
+            # target_time보다 늦은 값이 없음
+            return None
+
+    def _get_n_days_before_maturity(self, current_timestep):
+
+        current_timestep = pd.Timestamp(current_timestep)
+        nearest_timestep = self._find_nearest_later_timestep(self.maturity_list, current_timestep)
+        
+        if nearest_timestep == None:
+            # 더 늦은 만기일이 없는 경우 
+            return 0 
+        else:
+            # 가장 근접한 만기일과 현재 날짜를 비교 
+            return (nearest_timestep - current_timestep).days
 
 
     def get_mask(self):
@@ -156,13 +179,13 @@ class FuturesEnvironment:
     def _force_liquidate_all_positions(self, current_price):
         """리스크 제한 초과 시 모든 포지션 강제 청산"""
         if self.account.execution_strength == 0:
-            return
+            return 0,0
 
         # 현재 체결된 계약에서 반대 포지션을 취함 
         reversed_execution = -self.account.execution_strength * self.account.current_position
         net_pnl, cost = self.account.step(reversed_execution, current_price, self.current_timestep) # self.account.settle_total_contract(market_pt=current_price) 
 
-        return net_pnl, cost, reversed_execution
+        return net_pnl, cost
     
     def _get_market_features(self) -> Dict[str, float]:
         """현재 시장 상태 관련 주요 지표 반환"""
@@ -182,16 +205,12 @@ class FuturesEnvironment:
         info = 'end_of_data' if done else ''
         return done, info 
 
-    def _is_maturity_data(self, next_timestep, current_timestep):
-        # 만기
+    def _check_maturity_data(self, next_timestep, current_timestep):
+        # 만기일 확인
         is_maturity_date = self.current_timestep.date() in self.maturity_list
-        day_changed = is_day_changed(next_timestep=next_timestep,
-                                     current_timestep=current_timestep)
-        
-        done = is_maturity_date & day_changed
-
-        info = 'maturity_data' if done else ''
-        return done, info
+        day_changed = is_day_changed(next_timestep=next_timestep, current_timestep=current_timestep)
+        if is_maturity_date and day_changed:
+            self.info = 'maturity_data'
     
     def _is_bankrupt(self):
         done = self.account.available_balance <= 0
@@ -250,7 +269,9 @@ class FuturesEnvironment:
             next_timestep=next_timestep,
             max_strength=self.position_cap,
             current_strength=self.account.execution_strength,
-            intraday_only=self.intraday_only
+            intraday_only=self.intraday_only,
+            max_step=self.max_step,
+            maintained_steps=self.maintained_steps
         ):
             return True, 'done'
         
@@ -289,7 +310,7 @@ class FuturesEnvironment:
         net_realized_pnl, cost = self.account.step(action, current_price, next_timestep)
         
         # ===========================================
-        # 
+        self._check_maturity_data(next_timestep, self.current_timestep)
         self._check_insufficient()
         self._check_near_margin_call()
         # ===========================================
@@ -305,8 +326,8 @@ class FuturesEnvironment:
         
         # 9. 강제 청산 처리
         forced_liquidation_pnl = 0.0
-        if self.info in ['margin_call', 'maturity_data']:
-            forced_liquidation_pnl, _cost = self._force_liquidate_all_positions()
+        if self.info in ['margin_call', 'maturity_data', 'end_of_data']:
+            forced_liquidation_pnl, _cost = self._force_liquidate_all_positions(current_price)
             
             # 강제 청산 후 자산 계산
             current_equity = self.account.available_balance + self.account.unrealized_pnl
@@ -382,7 +403,7 @@ class FuturesEnvironment:
         if done:
             self.performance_tracker.complete_episode(current_equity)
 
-        if self.info == 'done':
+        if is_day_changed(next_timestep=next_timestep, current_timestep=self.current_timestep):
             self.account.daily_settlement(current_price)
 
         # 성과 지표 
@@ -431,6 +452,13 @@ class FuturesEnvironment:
 
         self.account.net_realized_pnl = net_realized_pnl
         self.account.net_realized_pnl_without_cost = net_realized_pnl + cost
+
+        try:
+            _data_iterator = copy.deepcopy(self.data_iterator)
+            _ = next(_data_iterator)
+
+        except StopIteration:
+            done = True
 
         return next_state, reward, done
     

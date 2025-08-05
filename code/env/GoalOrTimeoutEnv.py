@@ -7,7 +7,7 @@ from env.done_ftn import *
 from env.reward_ftn import *
 from env.account import *
 from env.maturity_ftn import *
-from env.env_f import *
+from env.BasicEnv import *
 
 # GOTRandomEnv을 위한 것 
 from env.EpisodeData import *
@@ -321,8 +321,8 @@ class GOTRandomEnv(GoalOrTimeoutEnv):
 
         self.maturity_list = calculate_maturity(dates)
         # print(self.maturity_list)
-        self.maturity_iter = iter(self.maturity_list)
-        self.latest_maturity_day = next(self.maturity_iter)
+        # self.maturity_iter = iter(self.maturity_list)
+        # self.latest_maturity_day = next(self.maturity_iter)
         
         # === 계좌 및 거래 비용 설정 ===
         self.account = Account(start_budget, position_cap, self.current_timestep, 
