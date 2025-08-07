@@ -287,12 +287,12 @@ class GOTNonEpisodicTrainer(NonEpisodicTrainer):
         return episode_rewards, env_execution_strengths, pnls, asset_history, actions, equity_history, contract_history
 
 
-class GOTRandomTrainer(NonEpisodicTrainer):
+class GOTRandomTrainer(GOTNonEpisodicTrainer):
     def __init__(self, df, env, train_valid_timestep, window_size, state, reward_ftn, done_ftn, start_budget, scaler, position_cap, # env 관련 파라미터 
                  agent, model, optimizer, device,  # agent 관련 파라미터 
                  n_steps, ma_interval, save_interval,
                  path, print_log_interval, 
-                 print_env_log_interval, save_visual_log=False, n_iteration=10_000
+                 print_env_log_interval, save_visual_log=False, n_iteration=5_000
                  ):
         super().__init__(df, env, train_valid_timestep, window_size, state, reward_ftn, done_ftn, start_budget, scaler, position_cap, # env 관련 파라미터 
                         agent, model, optimizer, device,  

@@ -295,7 +295,7 @@ class GOTRandomEnv(GoalOrTimeoutEnv):
 
         # define dataset 
         self.base_dataset = FuturesDataset(self.df, window_size, self.scaler)               # 해당 timestep의 전체 데이터셋
-        self.episode_dataset = EpisodeDataset(self.base_dataset, window_len=max_step)   # 에피소드로 데이터셋을 묶은 애
+        self.episode_dataset = EpisodeDataset(self.base_dataset, window_len=self.max_step+1)   # 에피소드로 데이터셋을 묶은 애
         self.episode_loader = EpisodeDataloader(self.episode_dataset, shuffle=True)         # 그걸 섞고 관리하는 애 
         self.dataset = next(self.episode_loader)
         self.episode_iterator = iter(self.dataset)                                   # 콜하면 하나의 에피소드[MiniFuturesDataset]
