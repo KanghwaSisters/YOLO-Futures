@@ -11,7 +11,7 @@ from env.maturity_ftn import *
 # 선물 트레이딩 환경 클래스
 from env.risk import RiskMetrics, MarketStateManager, PerformanceTracker, MarketRegime
 
-class FuturesEnvironment:
+class HorizonBoundEnv:
     """선물 거래 환경 클래스"""
     
     def __init__(self, 
@@ -25,6 +25,7 @@ class FuturesEnvironment:
                  n_actions: int, 
                  position_cap: float = float('inf'),
                  scaler=None,
+                 max_step=3_000,
                  # 거래 비용 및 리스크 파라미터
                  transaction_cost: float = 0.0005,
                  slippage_factor: float = 0.0001,
@@ -38,6 +39,7 @@ class FuturesEnvironment:
         self._date_range = date_range
         self.n_actions = n_actions
         self.df = self._slice_by_date(full_df, date_range)
+        self.max_step = max_step
         
         self.scaler = scaler
         self.window_size = window_size
@@ -59,7 +61,8 @@ class FuturesEnvironment:
         # === 시장 정보 ===
         self.previous_price = None
         self.contract_unit = 50000  # 미니 선물 계약 단위
-        self.current_timestep = date_range[0]
+        self.current_timestep = self.dataset[0][-1]
+        self.start_budget = start_budget
         
         # 만기일 계산
         mask = self._full_df.index >= pd.to_datetime(self._date_range[0])
@@ -81,7 +84,7 @@ class FuturesEnvironment:
         
         # === 관리 객체 초기화 ===
         self.market_state_manager = MarketStateManager()
-        self.performance_tracker = PerformanceTracker(start_budget)
+        self.performance_tracker = PerformanceTracker(self.start_budget)
         self.risk_metrics = RiskMetrics(risk_lookback)
         # self.total_trades = 0
         self.winning_trades = 0
@@ -156,13 +159,13 @@ class FuturesEnvironment:
     def _force_liquidate_all_positions(self, current_price):
         """리스크 제한 초과 시 모든 포지션 강제 청산"""
         if self.account.execution_strength == 0:
-            return
+            return 0,0
 
         # 현재 체결된 계약에서 반대 포지션을 취함 
         reversed_execution = -self.account.execution_strength * self.account.current_position
         net_pnl, cost = self.account.step(reversed_execution, current_price, self.current_timestep) # self.account.settle_total_contract(market_pt=current_price) 
 
-        return net_pnl, cost, reversed_execution
+        return net_pnl, cost
     
     def _get_market_features(self) -> Dict[str, float]:
         """현재 시장 상태 관련 주요 지표 반환"""
@@ -176,27 +179,23 @@ class FuturesEnvironment:
             'total_trades': self.account.total_trades,
             'transaction_cost_ratio': self.account.total_transaction_costs / self.account.initial_budget
         }
-    
+
     def _is_dataset_reached_end(self, current_timestep):
         done = self.dataset.reach_end(current_timestep)
         info = 'end_of_data' if done else ''
         return done, info 
-
-    def _is_maturity_data(self, next_timestep, current_timestep):
-        # 만기
-        is_maturity_date = self.current_timestep.date() in self.maturity_list
-        day_changed = is_day_changed(next_timestep=next_timestep,
-                                     current_timestep=current_timestep)
-        
-        done = is_maturity_date & day_changed
-
-        info = 'maturity_data' if done else ''
-        return done, info
     
     def _is_bankrupt(self):
         done = self.account.available_balance <= 0
         info = 'bankrupt' if done else ''
         return done, info
+
+    def _check_maturity_data(self, next_timestep, current_timestep):
+        # 만기일 확인
+        is_maturity_date = self.current_timestep.date() in self.maturity_list
+        day_changed = is_day_changed(next_timestep=next_timestep, current_timestep=current_timestep)
+        if is_maturity_date and day_changed:
+            self.info = 'maturity_data'
     
     def _check_near_margin_call(self):
         # 현재 딱 마진콜 기준 (7%)
@@ -250,19 +249,19 @@ class FuturesEnvironment:
             next_timestep=next_timestep,
             max_strength=self.position_cap,
             current_strength=self.account.execution_strength,
-            intraday_only=self.intraday_only
+            intraday_only=self.intraday_only,
+            maintained_steps=self.maintained_steps,
+            max_step=self.max_step
         ):
             return True, 'done'
+        
+        # 날마다 done 
+        if is_day_changed(next_timestep=next_timestep, current_timestep=self.current_timestep):
+            return True, 'end_of_day'
         
         # 데이터셋 종료 확인
         if self.dataset.reach_end(next_timestep):
             return True, 'end_of_data'
-        
-        # 만기일 확인
-        is_maturity_date = self.current_timestep.date() in self.maturity_list
-        day_changed = is_day_changed(next_timestep=next_timestep, current_timestep=self.current_timestep)
-        if is_maturity_date and day_changed:
-            return True, 'maturity_data'
         
         # 파산 확인
         if self.account.available_balance <= 0:
@@ -287,10 +286,12 @@ class FuturesEnvironment:
         
         # 2. 계좌 업데이트 (거래 실행)
         net_realized_pnl, cost = self.account.step(action, current_price, next_timestep)
+        self.maintained_steps += 1 
         
         # ===========================================
         # 
         self._check_insufficient()
+        self._check_maturity_data(next_timestep, self.current_timestep)
         self._check_near_margin_call()
         # ===========================================
         
@@ -305,8 +306,8 @@ class FuturesEnvironment:
         
         # 9. 강제 청산 처리
         forced_liquidation_pnl = 0.0
-        if self.info in ['margin_call', 'maturity_data']:
-            forced_liquidation_pnl, _cost = self._force_liquidate_all_positions()
+        if self.info in ['margin_call', 'maturity_data', 'end_of_data', 'done']:
+            forced_liquidation_pnl, _cost = self._force_liquidate_all_positions(current_price)
             
             # 강제 청산 후 자산 계산
             current_equity = self.account.available_balance + self.account.unrealized_pnl
@@ -381,13 +382,13 @@ class FuturesEnvironment:
         # 10. 에피소드 완료 처리
         if done:
             self.performance_tracker.complete_episode(current_equity)
-
-        if self.info == 'done':
+        
+        # 당일 마지막 거래에서 미실현 손익 >> 실현 손익으로 전환 
+        if is_day_changed(next_timestep=next_timestep, current_timestep=self.current_timestep):
             self.account.daily_settlement(current_price)
 
         # 성과 지표 
         perf = self.get_performance_summary() # 'cost_ratio', 'market_regime', 'volatility_regime'
-
         
         # 11. 보상 계산
         reward = self.get_reward(
@@ -547,11 +548,6 @@ class FuturesEnvironment:
     def conti(self):
         """done 후에도 다음 상태를 반환 (연속 거래용)"""
         return self.next_state
-    
-    def render(self, state, action, next_state):
-        """기존 코드 호환성을 위한 render 메서드"""
-        # 필요시 시각화 로직 구현
-        pass
     
     def __str__(self):
         """환경 상태 및 주요 성과 출력"""

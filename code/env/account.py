@@ -67,6 +67,9 @@ class Account:
         # 정보 업데이트
         self.update_account(market_pt)
 
+        # (추가) 실현 손익 비율 업데이트
+        self.realized_pnl_ratio = self.realized_pnl / self.initial_budget
+
         if get_history:
             return realized_net_pnl, cost
 
@@ -258,6 +261,7 @@ class Account:
 
         # 손익 (계좌로 계산 가능한데 따로 있어도 괜찮을 듯)
         self.realized_pnl = 0                   # 누적 실현 손익
+        self.realized_pnl_ratio = 0             # 실현 손익 / 초기 자산 
         self.prev_realized_pnl = 0              # 직전 스텝의 누적 실현 손익 (KRW)
         self.net_realized_pnl = 0               # 현 스텝의 실제 실현 손익 
         self.net_realized_pnl_without_cost = 0  # 현 스텝의 순수 실현 손익

@@ -1,0 +1,9 @@
+{
+  "terminal.integrated.profiles.linux": {
+    "YOLO-Futures": {
+      "path": "/bin/bash",
+      "args": ["-c", "conda activate YOLO-Futures && exec bash"]
+    }
+  },
+  "terminal.integrated.defaultProfile.linux": "YOLO-Futures"
+}

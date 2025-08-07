@@ -4,7 +4,7 @@ import warnings
 from config import CONFIG
 from easydict import EasyDict
 
-from env.env_f import *
+from env.BasicEnv import *
 from state.state import *
 from agent.PPOAgent_ms import *
 from models.CTTS import *
@@ -17,22 +17,19 @@ from visualization.methods import *
 
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-def main(CONFIG, 
-        Network=RegimeAwareMultiStatePV,
-        Trainer=NonEpisodicTrainer, 
-        Agent=PPOAgent):
+def main(CONFIG):
 
     # load dataset 
     with open(CONFIG.DATASET_PATH, 'rb') as f:
         df = pickle.load(f)
 
     # timestep 분리 
-    train_valid_timestep = split_date_ranges_by_group(df.index, n_group=15, train_ratio=0.9) # [:70000]
+    train_valid_timestep = split_date_ranges_by_group(df.index, n_group=CONFIG.N_GROUP, train_ratio=0.9) 
     CONFIG.TRAIN_VALID_TIMESTEP = train_valid_timestep 
 
     state =  State(CONFIG.TARGET_VALUES)
 
-    model = Network(
+    model = CONFIG.NETWORK(
         input_dim=CONFIG.INPUT_DIM,
         agent_input_dim=CONFIG.AGENT_INPUT_DIM,
         embed_dim=CONFIG.EMBED_DIM,
@@ -49,7 +46,7 @@ def main(CONFIG,
         dropout=CONFIG.DROPOUT
     )
 
-    agent = Agent(
+    agent = CONFIG.AGENT(
         action_space=CONFIG.ACTION_SPACE,
         n_actions=CONFIG.N_ACTIONS,
         model=model,
@@ -63,9 +60,9 @@ def main(CONFIG,
         device=CONFIG.DEVICE
     )
 
-    trainer = Trainer( 
+    trainer = CONFIG.TRAINER( 
         df=df,
-        env=FuturesEnvironment,
+        env=CONFIG.ENV,
         train_valid_timestep=CONFIG.TRAIN_VALID_TIMESTEP,
         window_size=CONFIG.WINDOW_SIZE,
         state=state,
@@ -83,13 +80,13 @@ def main(CONFIG,
         save_interval=CONFIG.SAVE_INTERVAL,
         path=CONFIG.PATH,
         print_log_interval=CONFIG.PRINT_LOG_INTERVAL,
-        print_env_log_interval=CONFIG.PRINT_ENV_LOG_INTERVAL
+        print_env_log_interval=CONFIG.PRINT_ENV_LOG_INTERVAL,
+        n_iteration=CONFIG.N_ITERATION
     )
 
-    CONFIG.TRAINER = trainer
     trainer.save(CONFIG)
     trainer()
     
 
 if __name__ == '__main__':
-    main(CONFIG, Trainer=EpisodicTrainer)
+    main(CONFIG)

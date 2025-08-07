@@ -14,3 +14,8 @@ def is_day_changed_wt_max(**kwargs):
     is_max = (kwargs['max_strength'] < kwargs['current_strength'])
     
     return is_day_changed or is_max
+
+def reach_max_step(**kwargs):
+    return (kwargs['max_step'] == kwargs['maintained_steps'])
+
+    

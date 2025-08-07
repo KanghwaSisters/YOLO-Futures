@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run YOLO-Futures",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/YOLO-Futures/main.py", // 수정
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}/YOLO-Futures",
+      "env": {
+        "CONDA_DEFAULT_ENV": "YOLO-Futures"
+      }
+    }
+  ]
+}
