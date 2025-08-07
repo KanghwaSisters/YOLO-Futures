@@ -5,7 +5,8 @@ class GOTNonEpisodicTrainer(NonEpisodicTrainer):
     def __init__(self, df, env, train_valid_timestep, window_size, state, reward_ftn, done_ftn, start_budget, scaler, position_cap, # env 관련 파라미터 
                  agent, model, optimizer, device,  # agent 관련 파라미터 
                  n_steps, ma_interval, save_interval,
-                 path, print_log_interval, print_env_log_interval, save_visual_log=False
+                 path, print_log_interval, print_env_log_interval, save_visual_log=False,
+                 **kwargs
                  ):
         super().__init__(df, env, train_valid_timestep, window_size, state, reward_ftn, done_ftn, start_budget, scaler, position_cap, # env 관련 파라미터 
                         agent, model, optimizer, device,  

@@ -11,7 +11,7 @@ from env.maturity_ftn import *
 # 선물 트레이딩 환경 클래스
 from env.risk import RiskMetrics, MarketStateManager, PerformanceTracker, MarketRegime
 
-class FuturesEnvironment:
+class HorizonBoundEnv:
     """선물 거래 환경 클래스"""
     
     def __init__(self, 
