@@ -4,7 +4,7 @@ import warnings
 from config import CONFIG
 from easydict import EasyDict
 
-from env.env import *
+from env.BasicEnv import *
 from state.state import *
 from agent.PPOAgent_ms import *
 from models.CTTS import *
