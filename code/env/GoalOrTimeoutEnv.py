@@ -343,10 +343,6 @@ class GOTRandomEnv(GoalOrTimeoutEnv):
         self.info = ''
         self.mask = np.ones(self.n_actions, dtype=np.int32).tolist()
         
-        # === 페널티 설정 ===
-        self.hold_over_penalty = -0.05
-        self.margin_call_penalty = -1.0
-        
         # === 외부 함수 ===
         self.sign = lambda x: (x > 0) - (x < 0)
         self.get_reward = reward_ftn
