@@ -185,7 +185,7 @@ def GOT_pnl_reward(alpha=1.0,
 
     # 청산 시점 보너스
     if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
-        reward += ((kwargs['equity'] - kwargs['initial_budget']) / kwargs['initial_budget']) * bonus_scale
+        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor ) * bonus_scale
 
     # 환경 정보 기반 보너스/패널티
     if env_info == 'margin_call':
@@ -200,3 +200,182 @@ def GOT_pnl_reward(alpha=1.0,
         reward += goal_reward_bonus
 
     return np.tanh(reward)
+
+
+def GOT_pnl_reward_log(alpha=1.0,
+                        beta=0.3,
+                        bonus=0.5,
+                        margin_call_penalty=-1.0,
+                        maturity_date_penalty=-0.5,
+                        bankrupt_penalty=-1.0,
+                        goal_reward_bonus=1.0,
+                        scaling_factor=10_000,
+                        env_info='',
+                        **kwargs):
+
+    delta_unrealized_pnl = kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']
+    net_realized_pnl = kwargs['net_realized_pnl']
+
+    reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor 
+
+    # 청산 시점 보너스
+    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+        # reward += ((kwargs['equity'] - kwargs['initial_budget']) / kwargs['initial_budget']) * bonus
+        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
+
+    # 환경 정보 기반 보너스/패널티
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+    elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
+        reward += maturity_date_penalty
+
+    elif env_info == 'goal_profit':
+        reward += goal_reward_bonus
+
+    scaled_reward = np.sign(reward) * np.log1p(abs(reward))
+
+    return np.clip(scaled_reward, -2, 2)
+
+def GOT_tanh_reward_postpenalty(alpha=1.0,
+                                beta=0.3,
+                                bonus=0.5,
+                                margin_call_penalty=-1.0,
+                                maturity_date_penalty=-0.5,
+                                bankrupt_penalty=-1.0,
+                                goal_reward_bonus=1.0,
+                                scaling_factor=10_000,
+                                env_info='',
+                                **kwargs):
+    '''tanh + 패널티 적용 후 전체 스케일링'''
+    delta_unrealized_pnl = kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']
+    net_realized_pnl = kwargs['net_realized_pnl']
+
+    reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor 
+
+    # 청산 시점 보너스
+    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+        # reward += ((kwargs['equity'] - kwargs['initial_budget']) / kwargs['initial_budget']) * bonus
+        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
+
+    # 환경 정보 기반 보너스/패널티
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+    elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
+        reward += maturity_date_penalty
+    elif env_info == 'goal_profit':
+        reward += goal_reward_bonus
+
+    return np.tanh(reward) 
+
+
+
+def GOT_tanh_reward_prepenalty(alpha=1.0,
+                                beta=0.3,
+                                bonus=0.5,
+                                margin_call_penalty=-1.0,
+                                maturity_date_penalty=-0.5,
+                                bankrupt_penalty=-1.0,
+                                goal_reward_bonus=1.0,
+                                scaling_factor=10_000,
+                                env_info='',
+                                **kwargs):
+    '''tanh + 보상 스케일링 후 패널티 적용'''
+    delta_unrealized_pnl = kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']
+    net_realized_pnl = kwargs['net_realized_pnl']
+
+    reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor 
+
+    # 청산 시점 보너스
+    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
+
+    # scaling 
+    reward = np.tanh(reward)
+
+    # 환경 정보 기반 보너스/패널티
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+    elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
+        reward += maturity_date_penalty
+    elif env_info == 'goal_profit':
+        reward += goal_reward_bonus
+
+    return reward 
+
+
+def GOT_log_reward_postpenalty(alpha=1.0,
+                                beta=0.3,
+                                bonus=0.5,
+                                margin_call_penalty=-1.0,
+                                maturity_date_penalty=-0.5,
+                                bankrupt_penalty=-1.0,
+                                goal_reward_bonus=1.0,
+                                scaling_factor=10_000,
+                                env_info='',
+                                **kwargs):
+    '''log1p + 패널티 적용 후 전체 스케일링'''
+    delta_unrealized_pnl = kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']
+    net_realized_pnl = kwargs['net_realized_pnl']
+
+    reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor 
+
+    # 청산 시점 보너스
+    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
+
+    # 환경 정보 기반 보너스/패널티
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+    elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
+        reward += maturity_date_penalty
+    elif env_info == 'goal_profit':
+        reward += goal_reward_bonus
+
+    scaled_reward = np.sign(reward) * np.log1p(abs(reward))
+
+    return np.clip(scaled_reward, -2, 2)
+
+def GOT_log_reward_prepenalty(alpha=1.0,
+                                beta=0.3,
+                                bonus=0.5,
+                                margin_call_penalty=-1.0,
+                                maturity_date_penalty=-0.5,
+                                bankrupt_penalty=-1.0,
+                                goal_reward_bonus=1.0,
+                                scaling_factor=10_000,
+                                env_info='',
+                                **kwargs):
+    '''log1p + 보상 스케일링 후 패널티 적용'''
+    delta_unrealized_pnl = kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']
+    net_realized_pnl = kwargs['net_realized_pnl']
+
+    reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor 
+
+    # 청산 시점 보너스
+    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
+
+    # scaled 
+    reward = np.sign(reward) * np.log1p(abs(reward))
+
+    # 환경 정보 기반 보너스/패널티 
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+    elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
+        reward += maturity_date_penalty
+    elif env_info == 'goal_profit':
+        reward += goal_reward_bonus
+
+    return np.clip(scaled_reward, -2, 2)
+
+
