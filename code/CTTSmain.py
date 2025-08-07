@@ -80,7 +80,8 @@ def main(CONFIG):
         save_interval=CONFIG.SAVE_INTERVAL,
         path=CONFIG.PATH,
         print_log_interval=CONFIG.PRINT_LOG_INTERVAL,
-        print_env_log_interval=CONFIG.PRINT_ENV_LOG_INTERVAL
+        print_env_log_interval=CONFIG.PRINT_ENV_LOG_INTERVAL,
+        n_iteration=CONFIG.N_ITERATION
     )
 
     trainer.save(CONFIG)

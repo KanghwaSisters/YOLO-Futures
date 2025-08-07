@@ -28,11 +28,11 @@ from utils.setDevice import *
 
 position_cap = 10
 
-target_values = ['close', 'high', 'low', 
+target_values = ['close', 'high', 'low', 'volume_change',
                 'ema_5', 'ema_20', 'ema_cross',
                 'rsi', '%K', '%D', 'cci',
                 'atr', 'bb_width',
-                'obv', 'volume_change']
+                'obv']
 
 # target_values = ['close', 'high', 'low',
 #                 'ema_5', 'ema_20', 
@@ -48,10 +48,10 @@ CONFIG = EasyDict({
     'ENV': GOTRandomEnv, # GOTRandomEnv,    # FuturesEnvironment, GoalOrTimeoutEnv
     'AGENT': DecoupledPPOAgent, # DecoupledPPOAgent
     'NETWORK': RegimeAwareMultiStatePV,
-    'REWARD_FTN': GOT_pnl_reward,
+    'REWARD_FTN': GOT_pnl_reward_log, # GOT_pnl_reward,
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
-    'PATH': 'logs/GOT/GPT',  # '../logs/RobustDivertedNonepi'
+    'PATH': 'logs/GOT/log_reward',  # '../logs/RobustDivertedNonepi'
     'DATASET_PATH': 'data/processed/kospi200_ffill_clean_version.pkl', # ../data/processed/kospi200_ffill_clean_version.pkl
 
     # 기본 설정
@@ -90,6 +90,7 @@ CONFIG = EasyDict({
     'DROPOUT': 0.1,
 
     # 학습 관련
+    'N_ITERATION' : 5_000,
     'N_STEPS': 2048,
     'MA_INTERVAL': 50,
     'SAVE_INTERVAL': 10,
