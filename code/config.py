@@ -83,8 +83,10 @@ from utils.setDevice import *
 # 1. MultiStatePV 
 # - 가장 baseline이 되는 모델로, Timeseries Data와 Agent info를 
 # 별도로 처리해 fusion한다. fusion한 이후 Actor와 Critic으로 분기한다. 
+# - AGENT_INPUT_DIM : 7
 # 2. RegimeAwareMultiStatePV 
 # - 단기적인 장 정보를 추가적으로 임베딩한다. 
+# - AGENT_INPUT_DIM : 8
 # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ INFORMER ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 # 1.
 # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ DLINEAR ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
@@ -109,14 +111,14 @@ device = get_device()
 
 CONFIG = EasyDict({
     # main component. 
-    'TRAINER': GOTNonEpisodicTrainer, 
-    'ENV': GoalOrTimeoutEnv, 
+    'TRAINER': GOTRandomTrainer, 
+    'ENV': GOTRandomEnv, 
     'AGENT': DecoupledPPOAgent,
-    'NETWORK': RegimeAwareMultiStatePV,
-    'REWARD_FTN': GOT_pnl_reward_log, 
+    'NETWORK': DropRegimeNet,
+    'REWARD_FTN': GOT_log_reward_postpenalty, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
-    'PATH': 'logs/GOT/log_reward',  # '../logs/RobustDivertedNonepi'
+    'PATH': 'logs/GOT/log_post_Drop',  # '../logs/RobustDivertedNonepi'
     'DATASET_PATH': 'data/processed/kospi200_ffill_clean_version.pkl', # ../data/processed/kospi200_ffill_clean_version.pkl
 
     # 기본 설정
@@ -155,7 +157,7 @@ CONFIG = EasyDict({
     'DROPOUT': 0.1,
 
     # 학습 관련
-    'N_ITERATION' : 5_000,
+    'N_ITERATION' : 4_000,
     'N_STEPS': 2048,
     'MA_INTERVAL': 50,
     'SAVE_INTERVAL': 10,

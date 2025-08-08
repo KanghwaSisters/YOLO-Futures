@@ -365,6 +365,7 @@ def GOT_log_reward_prepenalty(alpha=1.0,
 
     # scaled 
     reward = np.sign(reward) * np.log1p(abs(reward))
+    reward = np.clip(reward, -2, 2)
 
     # 환경 정보 기반 보너스/패널티 
     if env_info == 'margin_call':
@@ -376,6 +377,6 @@ def GOT_log_reward_prepenalty(alpha=1.0,
     elif env_info == 'goal_profit':
         reward += goal_reward_bonus
 
-    return np.clip(scaled_reward, -2, 2)
+    return reward
 
 

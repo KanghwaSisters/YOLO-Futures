@@ -262,7 +262,6 @@ class GOTNonEpisodicTrainer(NonEpisodicTrainer):
                 
                 if env.info !='end_of_data':
                     pnls = []
-                    contract_history = []
 
 
             if (episode+1) % self.print_env_log_interval == 0:
