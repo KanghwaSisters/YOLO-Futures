@@ -4,3 +4,5 @@ __pycache__/
 *.pkl
 Anaconda3-2024.10-1-Linux-x86_64.sh
 miniconda.sh
+InformerTest/checkpoints/
+InformerTest/results/
