@@ -542,7 +542,7 @@ class NonEpisodicTrainer:
         return position.item(), strength.item()
     
     def log(self, message):
-        with open(self.log_file, "a") as f:
+        with open(self.log_file, "a", encoding='utf-8') as f:
             f.write(message + "\n")
 
     def time_is(self, start_time, status):
