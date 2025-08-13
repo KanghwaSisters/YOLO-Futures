@@ -74,10 +74,11 @@ class DLinearModel(nn.Module):
 
 ################### train 관련
 class TimeSeriesDataset(Dataset):
-    def __init__(self, df, seq_len=80, pred_len=15, train=True, mean=None, sd=None):
+    def __init__(self, df, seq_len=80, pred_len=15, scale_factor=1.0, train=True, mean=None, sd=None):
         self.data = df.values.astype(np.float32)
         self.seq_len = seq_len
         self.pred_len = pred_len
+        self.scale_factor = scale_factor
 
         if train:
             self.mean = np.mean(self.data, axis=0)
@@ -86,10 +87,8 @@ class TimeSeriesDataset(Dataset):
             self.mean = mean
             self.sd = mean
 
-        temp = (self.data[:, 1:] - self.mean[1]) / self.sd[1]
-        self.norm_data = np.concatenate([self.data[:,:1], temp], axis=0)
-
-    
+        self.norm_data = ((self.data - self.mean) / self.sd) * self.scale_factor
+        
     def __getitem__(self, idx):
         x = self.norm_data[idx : idx + self.seq_len].transpose()
         y = self.norm_data[idx + self.seq_len : idx + self.seq_len + self.pred_len].transpose()
@@ -103,15 +102,15 @@ class TimeSeriesDataset(Dataset):
 
     def inverse_transform(self, data, features):
         data = np.array(data)
-        # return data * self.sd[:features] + self.mean[:features]
-        return data
+        return data * self.sd[:features] + self.mean[:features]
+        # return data
 
 
 class DLinearAgent:
     def __init__(self, data, batch_size, train_rate, test_rate, time_section,
                  window_size, seq_len, pred_len, pred_feature, device,
                  discrete_var:bool, threshold_rate, 
-                 lr, alpha, beta, gamma, lmbd, 
+                 lr, alpha, beta, gamma, lmbd, scale_factor,
                  folder_name):
         self.data = data
         self.batch_size = batch_size
@@ -131,6 +130,7 @@ class DLinearAgent:
         self.beta = beta
         self.gamma = gamma
         self.lmbd = lmbd
+        self.scale_factor = scale_factor
 
         self.total_len = len(data)
 
@@ -158,13 +158,13 @@ class DLinearAgent:
 
         self.train_dataset = TimeSeriesDataset(df=self.data.iloc[:train_end_idx], 
                                                 seq_len=self.seq_len, pred_len=self.pred_len,
-                                                train=True)
+                                                scale_factor=self.scale_factor, train=True)
         self.valid_dataset = TimeSeriesDataset(df=self.data.iloc[train_end_idx:test_start_idx], 
                                                 seq_len=self.seq_len, pred_len=self.pred_len,
-                                                train=False, mean=self.train_dataset.mean, sd=self.train_dataset.sd)
+                                                scale_factor=self.scale_factor, train=False, mean=self.train_dataset.mean, sd=self.train_dataset.sd)
         self.test_dataset = TimeSeriesDataset(df=self.data.iloc[test_start_idx:], 
                                                 seq_len=self.seq_len, pred_len=self.pred_len,
-                                                train=False, mean=self.train_dataset.mean, sd=self.train_dataset.sd)
+                                                scale_factor=self.scale_factor, train=False, mean=self.train_dataset.mean, sd=self.train_dataset.sd)
 
         self.train_loader = DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
         self.valid_loader = DataLoader(self.valid_dataset, batch_size=self.batch_size, shuffle=False)
