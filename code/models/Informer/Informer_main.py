@@ -2,7 +2,7 @@ import argparse
 import os
 import torch
 
-from exp.exp_informer import Exp_Informer
+from models.Informer.exp.exp_informer import Exp_Informer
 
 parser = argparse.ArgumentParser(description='[Informer] Long Sequences Forecasting')
 

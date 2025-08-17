@@ -1,9 +1,9 @@
-from data.data_loader import Dataset_Kospi200, Dataset_Pred
-from exp.exp_basic import Exp_Basic
-from models.model import Informer, InformerStack
+from models.Informer.data.data_loader import Dataset_Kospi200, Dataset_Pred
+from models.Informer.exp.exp_basic import Exp_Basic
+from models.Informer.models.model import Informer, InformerStack
 
-from utils.tools import EarlyStopping, adjust_learning_rate
-from utils.metrics import metric
+from models.Informer.utils.tools import EarlyStopping, adjust_learning_rate
+from models.Informer.utils.metrics import metric
 
 import numpy as np
 

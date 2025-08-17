@@ -1,1 +1,0 @@
-python main_informer.py --model informer --data kospi200 --root_path ../YOLO-Futures/data/processed/ --features S --target close --seq_len 96 --pred_len 24

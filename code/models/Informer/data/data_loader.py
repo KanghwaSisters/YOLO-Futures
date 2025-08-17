@@ -3,9 +3,9 @@ import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset, DataLoader
-from data.indicator_ftns import *
-from utils.tools import StandardScaler
-from utils.timefeatures import time_features
+from models.Informer.data.indicator_ftns import *
+from models.Informer.utils.tools import StandardScaler
+from models.Informer.utils.timefeatures import time_features
 import warnings
 
 warnings.filterwarnings('ignore')
@@ -71,7 +71,7 @@ class Dataset_Kospi200(Dataset):
             cols.remove(self.target)
 
         df_raw = df_raw[['date'] + cols + [self.target]]
-        df_raw = df_raw[:5000]
+        # df_raw = df_raw[:5000]
         
         df_raw = add_basic_indicators(df_raw)
         df_raw = add_trend_indicators(df_raw)
@@ -184,7 +184,7 @@ class Dataset_Pred(Dataset):
         df_raw = df_raw.reset_index().rename(columns={'index': 'date'})
         df_raw['date'] = pd.to_datetime(df_raw['date'])
         df_raw = df_raw.sort_values('date').reset_index(drop=True)
-        df_raw = df_raw[:5000]
+        # df_raw = df_raw[:5000]
         
 
         df_raw = add_basic_indicators(df_raw)
