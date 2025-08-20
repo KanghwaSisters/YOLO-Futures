@@ -314,11 +314,11 @@ def plot_action_distribution_heatmap(ax, timesteps, actions, n_actions=21):
     row_sums[row_sums == 0] = 1  # 0으로 나누기 방지
     action_probs = action_counts / row_sums
 
-    # 히트맵 그리기
+    # 히트맵 그리기 (원래 스타일 유지)
     im = ax.imshow(
         action_probs.T,
         aspect='auto',
-        cmap='RdYlBu_r',  # Hold가 없으니 더 다채로운 컬러맵 사용
+        cmap='Greys',  # 원래처럼 흑백 사용
         interpolation='nearest',
         origin='lower',
         extent=[0, n_time_bins, -0.5, n_unique_actions - 0.5]
@@ -351,23 +351,30 @@ def plot_action_distribution_heatmap(ax, timesteps, actions, n_actions=21):
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)
     cbar.set_label('Action Probability', rotation=270, labelpad=20)
 
-    # Short/Long 영역 구분선
+    # Short/Long 영역 구분 (원래 스타일로)
     negative_count = sum(1 for action in unique_actions if action < 0)
-    if negative_count > 0 and negative_count < len(unique_actions):
+    positive_count = sum(1 for action in unique_actions if action > 0)
+    
+    if negative_count > 0:
+        # Short 영역 (파랑 배경)
+        ax.axhspan(-0.5, negative_count - 0.5, alpha=0.1, color='blue', label='Short Zone')
+        ax.text(n_time_bins*0.02, negative_count/2 - 0.5, 'SHORT(-)',
+               bbox=dict(boxstyle='round,pad=0.2', facecolor='lightblue', alpha=0.7),
+               fontsize=8)
+    
+    if positive_count > 0:
+        # Long 영역 (빨강 배경)
+        positive_start = negative_count - 0.5 if negative_count > 0 else -0.5
+        ax.axhspan(positive_start, n_unique_actions - 0.5, alpha=0.1, color='red', label='Long Zone')
+        positive_mid = positive_start + (n_unique_actions - 0.5 - positive_start) / 2
+        ax.text(n_time_bins*0.02, positive_mid, 'LONG(+)',
+               bbox=dict(boxstyle='round,pad=0.2', facecolor='lightcoral', alpha=0.7),
+               fontsize=8)
+    
+    # 구분선 (있을 경우)
+    if negative_count > 0 and positive_count > 0:
         separation_line = negative_count - 0.5
-        ax.axhline(separation_line, color='black', linestyle='-', alpha=0.8, linewidth=2)
-        
-        # 영역 표시
-        if negative_count > 0:
-            ax.text(n_time_bins*0.02, negative_count/2 - 0.5, 'SHORT(-)',
-                   bbox=dict(boxstyle='round,pad=0.2', facecolor='lightblue', alpha=0.7),
-                   fontsize=8)
-        
-        if negative_count < len(unique_actions):
-            ax.text(n_time_bins*0.02, negative_count + (len(unique_actions)-negative_count)/2 - 0.5, 
-                   'LONG(+)',
-                   bbox=dict(boxstyle='round,pad=0.2', facecolor='lightcoral', alpha=0.7),
-                   fontsize=8)
+        ax.axhline(separation_line, color='black', linestyle='--', alpha=0.5, linewidth=1)
 
     # 통계 정보 추가
     total_actions = len(actions)
