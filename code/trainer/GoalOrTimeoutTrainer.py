@@ -48,6 +48,7 @@ class GOTNonEpisodicTrainer(NonEpisodicTrainer):
             
             ep_reward = 0
             ep_len = 0
+            env.since_entry = 0
             ep_n_positions = np.array([0, 0, 0]) # 순서대로 0, 1, -1
             ep_execution_strength = 0
 
@@ -56,9 +57,15 @@ class GOTNonEpisodicTrainer(NonEpisodicTrainer):
                     break
                 mask = env.mask
 
-                action, log_prob = agent.get_action(state, mask)
+                action, log_prob, log_policy = agent.get_action(state, mask)
                 next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
+                entry_mask, entry_score = env.is_entry(), env.get_score()
+
+                if entry_mask:
+                    env.since_entry = 0
+                else:
+                    env.since_entry += 1
 
                 if type(state) == tuple:
                     ts_state = torch.tensor(next_state[0], dtype=torch.float32).unsqueeze(0).to(self.device)
@@ -72,7 +79,10 @@ class GOTNonEpisodicTrainer(NonEpisodicTrainer):
                     next_state,
                     torch.tensor([done], dtype=torch.float32),
                     torch.tensor([log_prob], dtype=torch.float32),
-                    torch.tensor([mask], dtype=torch.bool)
+                    torch.tensor([mask], dtype=torch.bool),
+                    torch.tensor([bool(entry_mask)], dtype=torch.bool),
+                    torch.tensor([entry_score], dtype=torch.float32),
+                    log_policy
                 ])
 
                 # update step 지표
@@ -212,7 +222,7 @@ class GOTNonEpisodicTrainer(NonEpisodicTrainer):
                     break
                 mask = env.mask
 
-                action, _ = agent.get_action(state, mask)
+                action, _, _ = agent.get_action(state, mask)
                 next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
 
@@ -262,7 +272,6 @@ class GOTNonEpisodicTrainer(NonEpisodicTrainer):
                 
                 if env.info !='end_of_data':
                     pnls = []
-                    contract_history = []
 
 
             if (episode+1) % self.print_env_log_interval == 0:
@@ -364,6 +373,7 @@ class GOTRandomTrainer(GOTNonEpisodicTrainer):
             
             ep_reward = 0
             ep_len = 0
+            env.since_entry = 0
             ep_n_positions = np.array([0, 0, 0]) # 순서대로 0, 1, -1
             ep_execution_strength = 0
 
@@ -372,16 +382,16 @@ class GOTRandomTrainer(GOTNonEpisodicTrainer):
                     break
 
                 mask = env.mask
-
-                action, log_prob = agent.get_action(state, mask)
-                try:
-                    next_state, reward, done = env.step(action)
-                except StopIteration:
-                    print(f"[Episode {episode}] StopIteration occurred inside step()")
-                    done = True
-                    break
-
+                
+                action, log_prob, log_policy = agent.get_action(state, mask)
+                next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
+                entry_mask, entry_score = env.is_entry(), env.get_score()
+
+                if entry_mask:
+                    env.since_entry = 0
+                else:
+                    env.since_entry += 1
 
                 if type(next_state) == tuple:
                     ts_state, agent_state = next_state
@@ -400,7 +410,10 @@ class GOTRandomTrainer(GOTNonEpisodicTrainer):
                     next_state,
                     torch.tensor([done], dtype=torch.float32),
                     torch.tensor([log_prob], dtype=torch.float32),
-                    torch.tensor([mask], dtype=torch.bool)
+                    torch.tensor([mask], dtype=torch.bool),
+                    torch.tensor([bool(entry_mask)], dtype=torch.bool),
+                    torch.tensor([entry_score], dtype=torch.float32),
+                    log_policy
                 ])
 
                 # update step 지표

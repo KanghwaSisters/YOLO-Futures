@@ -58,6 +58,8 @@ class GoalOrTimeoutEnv(FuturesEnvironment):
         self.account.net_realized_pnl = 0
         self.account.net_realized_pnl_without_cost = 0
 
+        previous_balance = self.account.available_balance + self.account.unrealized_pnl
+
         # 1. 다음 데이터 가져오기
         next_fixed_state, close_price, next_timestep = next(self.data_iterator)
         current_price = close_price
@@ -180,7 +182,13 @@ class GoalOrTimeoutEnv(FuturesEnvironment):
             current_position=self.account.current_position,
             execution_strength=self.account.execution_strength,
             equity=self.account.available_balance,
-            initial_budget=self.account.initial_budget
+            initial_budget=self.account.initial_budget,
+            since_entry=self.since_entry,
+            score=self.get_score(),
+            max_step=self.max_step,
+            current_step=self.maintained_steps,
+            previous_balance=previous_balance,
+            current_balance=self.account.available_balance+self.account.unrealized_pnl
         )
         
         # 12. 다음 상태 생성
@@ -270,8 +278,6 @@ class GOTRandomEnv(GoalOrTimeoutEnv):
                  intraday_only: bool = False,
                  risk_lookback: int = 20):
 
-
-
         self.max_step = max_step
         self.net_pnl_ratio = net_pnl_ratio
 
@@ -353,6 +359,17 @@ class GOTRandomEnv(GoalOrTimeoutEnv):
         self.trade_history = []
         self.maintained_steps = 0
 
+    def get_score(self):
+        """ score """
+        df = self.base_dataset.cleaned_df
+        current_idx = df.index.get_loc(self.current_timestep)
+        price_data = df['score'].iloc[current_idx]
+        return price_data
+
+    def get_log_return(self):
+        df = self.base_dataset.cleaned_df
+        current_idx = df.index.get_loc(self.current_timestep)
+        return df['log_return'].iloc[current_idx]
 
     def reset(self):
         """환경 초기화"""

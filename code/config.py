@@ -77,14 +77,16 @@ from utils.setDevice import *
 # - Actor와 Critic을 구분해 별도의 옵티마이저를 사용한다. 
 # 단, 역전파는 통합 loss를 이용한다. 
 # ===================================================================================
-# [ 07 ] Model   
+# [ 06 ] Model   
 # ===================================================================================
 # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ CTTS ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 # 1. MultiStatePV 
 # - 가장 baseline이 되는 모델로, Timeseries Data와 Agent info를 
 # 별도로 처리해 fusion한다. fusion한 이후 Actor와 Critic으로 분기한다. 
+# - AGENT_INPUT_DIM : 7
 # 2. RegimeAwareMultiStatePV 
 # - 단기적인 장 정보를 추가적으로 임베딩한다. 
+# - AGENT_INPUT_DIM : 8
 # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ INFORMER ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 # 1.
 # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ DLINEAR ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
@@ -109,21 +111,21 @@ device = get_device()
 
 CONFIG = EasyDict({
     # main component. 
-    'TRAINER': GOTNonEpisodicTrainer, 
-    'ENV': GoalOrTimeoutEnv, 
+    'TRAINER': GOTNonEpisodicTrainer, # GOTRandomTrainer, 
+    'ENV': GoalOrTimeoutEnv, # GOTRandomEnv, 
     'AGENT': DecoupledPPOAgent,
     'NETWORK': RegimeAwareMultiStatePV,
-    'REWARD_FTN': GOT_pnl_reward_log, 
+    'REWARD_FTN': hybrid_reward, # GOT_log_reward_postpenalty, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
-    'PATH': 'logs/GOT/log_reward',  # '../logs/RobustDivertedNonepi'
+    'PATH': 'logs/GOT_KL_hybrid/28_scaling_mdc',  # Random_28_scaling # '../logs/RobustDivertedNonepi'
     'DATASET_PATH': 'data/processed/kospi200_ffill_clean_version.pkl', # ../data/processed/kospi200_ffill_clean_version.pkl
 
     # 기본 설정
     'DEVICE': device,
     'START_BUDGET': 30_000_000,
     'WINDOW_SIZE': 80,
-    'N_GROUP': 15,
+    'N_GROUP': 15,  # 15
     'POSITION_CAP': position_cap,
     'TARGET_VALUES': target_values,
     'TRAIN_VALID_TIMESTEP': None, 
@@ -133,7 +135,7 @@ CONFIG = EasyDict({
     'N_ACTIONS': 1+2*position_cap,
     'ACTION_SPACE': list(range(-position_cap, position_cap+1)),
     'GAMMA': 0.99,
-    'LR': 3e-4,
+    'LR': 0.00025, # 3e-4,
     'VALUE_COEFF': 0.5,
     'ENTROPY_COEFF': 0.05,
     'CLIP_EPS': 0.2,
@@ -155,10 +157,10 @@ CONFIG = EasyDict({
     'DROPOUT': 0.1,
 
     # 학습 관련
-    'N_ITERATION' : 5_000,
+    'N_ITERATION' : 1_000,
     'N_STEPS': 2048,
     'MA_INTERVAL': 50,
     'SAVE_INTERVAL': 10,
     'PRINT_LOG_INTERVAL': 1,
-    'PRINT_ENV_LOG_INTERVAL': 500
+    'PRINT_ENV_LOG_INTERVAL': 30
 })

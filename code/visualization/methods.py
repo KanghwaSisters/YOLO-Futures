@@ -35,7 +35,7 @@ def plot_market_with_actions(ax, name, timesteps, market, actions, reset_point, 
         plotted_labels.add(color)
 
     # 리셋 지점 표시
-    # ax.axvline(reset_point, linestyle='--', color='black', alpha=0.3, label='Init Recharge Point', zorder=2)
+    ax.axvline(reset_point, linestyle='--', color='black', alpha=0.3, label='Init Recharge Point', zorder=2)
 
     # 기타 설정
     ax.set_title(f'Market Flow with Actions : {name}')

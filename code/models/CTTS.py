@@ -465,3 +465,105 @@ class RegimeAwareMultiStatePV(nn.Module):
         value = self.critic(x)
         
         return logits, value
+
+class DropRegimeFusion(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 agent_input_dim,
+                 regime_embed_dim=4,
+                 num_regimes=3,
+                 embed_dim=64,
+                 kernel_size=3,
+                 stride=1,
+                 action_size=3,
+                 device='cpu',
+                 agent_hidden_dim=32,
+                 agent_out_dim=32,
+                 fusion_hidden_dim=64,
+                 num_layers=3,
+                 num_heads=4,
+                 d_ff=64,
+                 dropout=0.1,
+                 drop_regime_prob=0.2):
+
+        super().__init__()
+        self.timeseries_block = CTTS(input_dim, embed_dim, 
+                                     kernel_size, stride, device, 
+                                     num_layers, num_heads, 
+                                     d_ff, dropout)
+        
+        self.agent_block = AgentModel(agent_input_dim, agent_hidden_dim, agent_out_dim, dropout)
+        self.regime_embedding = nn.Embedding(num_embeddings=num_regimes, embedding_dim=regime_embed_dim)
+
+        # Fusion MLP layers
+        self.fusion_fc1 = nn.Linear(embed_dim + agent_out_dim + regime_embed_dim, fusion_hidden_dim)
+        self.fusion_relu = nn.ReLU()
+        self.fusion_dropout = nn.Dropout(dropout)
+        self.fusion_fc2 = nn.Linear(fusion_hidden_dim, fusion_hidden_dim)
+
+        self.drop_regime_prob = drop_regime_prob
+
+    def forward(self, x):
+        """
+        market_regime: Tensor of shape (B,) with values in {0: sideways, 1: bull, 2: bear}
+        """
+        ts_state, agent_state = x
+        agent_state, market_regime = agent_state[:,:-1], agent_state[:,-1]
+
+        # mapping: -1 → 2, 0 → 0, 1 → 1
+        regime_index = (market_regime == -1).long() * 2 + (market_regime == 1).long() * 1
+
+        ts_out = self.timeseries_block(ts_state)              # (B, embed_dim)
+        agent_out = self.agent_block(agent_state)             # (B, agent_out_dim)
+        regime_embed = self.regime_embedding(regime_index)    # (B, regime_embed_dim)
+
+        if self.training and self.drop_regime_prob > 0:
+            mask = torch.rand(regime_embed.shape[0], device=regime_embed.device) > self.drop_regime_prob
+            regime_embed = regime_embed * mask.unsqueeze(1)  # (B, regime_embed_dim)
+
+        fused = torch.cat([ts_out, agent_out, regime_embed], dim=1)
+        
+        x = self.fusion_fc1(fused)
+        x = self.fusion_relu(x)
+        x = self.fusion_dropout(x)
+        x = self.fusion_fc2(x)
+        
+        return x
+
+class DropRegimeNet(nn.Module):
+    def __init__(self,
+                 input_dim,
+                 agent_input_dim,
+                 regime_embed_dim=4,
+                 num_regimes=3,
+                 embed_dim=64,
+                 kernel_size=3,
+                 stride=1,
+                 action_size=3,
+                 device='cpu',
+                 agent_hidden_dim=32,
+                 agent_out_dim=32,
+                 fusion_hidden_dim=64,
+                 num_layers=3,
+                 num_heads=4,
+                 d_ff=64,
+                 dropout=0.1,
+                 drop_regime_prob=0.2):  # 추가됨
+        super().__init__()
+        
+        self.shared = DropRegimeFusion(input_dim, agent_input_dim, regime_embed_dim, num_regimes, embed_dim,            
+                                        kernel_size, stride, action_size, device, 
+                                        agent_hidden_dim, agent_out_dim, fusion_hidden_dim,
+                                        num_layers, num_heads, d_ff, dropout, drop_regime_prob)
+
+        self.actor = Actor(fusion_hidden_dim, action_size)
+        self.critic = Critic(fusion_hidden_dim)
+
+    def forward(self, x):
+        
+        x = self.shared(x)
+
+        logits = self.actor(x)
+        value = self.critic(x)
+        
+        return logits, value

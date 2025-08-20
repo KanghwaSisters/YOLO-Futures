@@ -32,14 +32,14 @@ class MarketStateManager:
         
     def update_market_regime(self, price_data: np.ndarray):
         """가격 데이터를 바탕으로 시장 상태 갱신"""
-        if len(price_data) < 80:
+        if len(price_data) < 150:
             return
         
-        short_ma = np.mean(price_data[-5:])
-        long_ma = np.mean(price_data[-80:])
+        short_ma = np.mean(price_data[-30:]) # 5
+        long_ma = np.mean(price_data[-150:]) # 80
         
         # 트렌드 방향 판단 
-        threshold = 0.003
+        threshold = 0.001 # 0.003
         
         if short_ma > long_ma * (1+threshold):
             self.market_regime = MarketRegime.BULL

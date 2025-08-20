@@ -1,4 +1,5 @@
 import numpy as np
+from env.DifferentialSharpeRatio import *
 
 def reward_unrealized_pnl(**kwargs):
     return kwargs['unrealized_pnl']
@@ -290,21 +291,21 @@ def GOT_tanh_reward_prepenalty(alpha=1.0,
     reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor 
 
     # 청산 시점 보너스
-    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
-        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
+    # if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+    #     reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
 
     # scaling 
     reward = np.tanh(reward)
 
     # 환경 정보 기반 보너스/패널티
-    if env_info == 'margin_call':
-        reward += margin_call_penalty
-    elif env_info == 'bankrupt':
-        reward += bankrupt_penalty
-    elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
-        reward += maturity_date_penalty
-    elif env_info == 'goal_profit':
-        reward += goal_reward_bonus
+    # if env_info == 'margin_call':
+    #     reward += margin_call_penalty
+    # elif env_info == 'bankrupt':
+    #     reward += bankrupt_penalty
+    # elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
+    #     reward += maturity_date_penalty
+    # elif env_info == 'goal_profit':
+    #     reward += goal_reward_bonus
 
     return reward 
 
@@ -326,8 +327,8 @@ def GOT_log_reward_postpenalty(alpha=1.0,
     reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor 
 
     # 청산 시점 보너스
-    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
-        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
+    # if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+    #     reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
 
     # 환경 정보 기반 보너스/패널티
     if env_info == 'margin_call':
@@ -357,25 +358,120 @@ def GOT_log_reward_prepenalty(alpha=1.0,
     delta_unrealized_pnl = kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']
     net_realized_pnl = kwargs['net_realized_pnl']
 
+    # 얼마나 실현했는가? 보너스 [추가]
+    # bonus_prop = (net_realized_pnl / (np.abs(delta_unrealized_pnl) + kwargs['eps']))
+    
     reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor 
-
+    
     # 청산 시점 보너스
-    if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
-        reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
+    # if kwargs['current_position'] == 0 and kwargs['prev_position'] != 0:
+    #     reward += ((kwargs['equity'] - kwargs['initial_budget']) / scaling_factor) * bonus
 
     # scaled 
     reward = np.sign(reward) * np.log1p(abs(reward))
+    reward = np.clip(reward, -2, 2)
 
     # 환경 정보 기반 보너스/패널티 
-    if env_info == 'margin_call':
-        reward += margin_call_penalty
-    elif env_info == 'bankrupt':
-        reward += bankrupt_penalty
-    elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
-        reward += maturity_date_penalty
-    elif env_info == 'goal_profit':
-        reward += goal_reward_bonus
+    # if env_info == 'margin_call':
+    #     reward += margin_call_penalty
+    # elif env_info == 'bankrupt':
+    #     reward += bankrupt_penalty
+    # elif env_info == 'maturity_data' and kwargs['execution_strength'] != 0:
+    #     reward += maturity_date_penalty
+    # elif env_info == 'goal_profit':
+    #     reward += goal_reward_bonus
 
+    return reward
+
+
+
+def GOT_log_reward_entryneutral(alpha=1.0,
+                                beta=0.3,
+                                bonus=0.5,
+                                margin_call_penalty=-1.0,
+                                maturity_date_penalty=-0.5,
+                                bankrupt_penalty=-1.0,
+                                goal_reward_bonus=1.0,
+                                scaling_factor=10_000,
+                                entry_L=30,          # 첫 진입 후 중립화할 스텝 수
+                                entry_weight=1.0,    # 엔트리 구간 가중
+                                use_vol_norm=True,   # 변동성 정규화 여부
+                                eps=1e-8,
+                                env_info='',
+                                **kwargs):
+    """
+    - 첫 진입 후 L 스텝: drift/vol 중립 보상
+    - 그 외: 기존 PnL 기반 보상
+    """
+    delta_unrealized_pnl = kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl']
+    net_realized_pnl     = kwargs['net_realized_pnl']
+    prev_pos             = kwargs.get('prev_position', 0)
+    since_entry          = kwargs.get('since_entry', 10**9)
+
+    # 1) 기본 PnL 보상
+    pnl_reward = (beta * delta_unrealized_pnl + alpha * net_realized_pnl) / scaling_factor
+
+    # 2) 엔트리-중립 구간 보상 치환
+    if since_entry < entry_L and prev_pos != 0:
+        score    = kwargs.get('score', None)
+        entry_reward = entry_weight * prev_pos * score
+        base_reward = entry_reward
+    else:
+        base_reward = pnl_reward
+
+    # 3) 환경 보너스/패널티
+    if env_info == 'margin_call':
+        base_reward += margin_call_penalty
+    elif env_info == 'bankrupt':
+        base_reward += bankrupt_penalty
+    elif env_info == 'maturity_data' and kwargs.get('execution_strength', 0) != 0:
+        base_reward += maturity_date_penalty
+    elif env_info == 'goal_profit':
+        base_reward += goal_reward_bonus
+
+    # 4) 스케일러(로그 압축 유지 or tanh로 대체 가능)
+    scaled_reward = np.sign(base_reward) * np.log1p(abs(base_reward))
     return np.clip(scaled_reward, -2, 2)
+
+
+def reward_per_equity(**kwargs):
+    # 현재 잔고 기반  
+    # 개똥쓰레기 성능 
+    MAX_STEPS = kwargs['max_step']
+    current_step = kwargs['current_step']
+    equity = kwargs['equity']
+
+    delay_modifier = (current_step / MAX_STEPS)
+
+    reward = equity * delay_modifier + current_step
+    reward = np.sign(reward) * np.log1p(abs(reward))
+
+    return reward
+
+
+DSR = DifferentialSharpeRatio()
+
+def hybrid_reward(w_profit=2,
+                  w_risk=8,
+                  scaling_factor=50_000,
+                  **kwargs):
+    def log(value):
+        # LOG without problems 
+        return np.sign(value) * np.log1p(abs(value))
+
+    # 초기 자산 
+    init_budget = kwargs['initial_budget']
+
+    # 종가를 기준으로, 포트폴리오 수익률 지표 
+    # 현재 포트폴리오 가치 = 보유 현금 + 미실현 손익 
+    portfolio_value = log(kwargs['current_balance']) - log(kwargs['previous_balance'])
+
+    # 종합 수익 지표 
+    R_profit = log(kwargs['net_realized_pnl'] / scaling_factor)  # 순실현손익 (cost 포함)
+    R_risk = DSR(portfolio_value)                             # DifferentialSharpeRatio (DSR)
+
+    return w_profit*R_profit + w_risk*R_risk
+
+
 
 
