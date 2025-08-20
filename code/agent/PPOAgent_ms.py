@@ -43,13 +43,12 @@ class PPOAgent:
             tensor([-0.69])        # log_prob
         )
     '''
-    def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, device, lam=0.98):
+    def __init__(self, action_space, n_actions, 
+                model, value_coeff, entropy_coeff, clip_eps, 
+                gamma, lr, batch_size, epoch, device, 
+                lam=0.98, lambda_entry=0.1, kappa=2.0, 
+                beta=1.0, regulation=3.0):
         '''
-        __init__(action_space: Any, n_actions: int, model: nn.Module,
-                value_coeff: float, entropy_coeff: float, clip_eps: float,
-                gamma: float, lr: float, lam: float) -> None
-
-        ----------
         PPOAgent 클래스 초기화 함수.
 
         모델, PPO 관련 계수들, 옵티마이저를 초기화한다.
@@ -65,6 +64,11 @@ class PPOAgent:
         self.value_coeff = value_coeff
         self.entropy_coeff = entropy_coeff
         self.clip_eps = clip_eps
+
+        self.lambda_entry = lambda_entry
+        self.kappa = kappa
+        self.beta = beta
+        self.regulation = regulation 
 
         # discount params 
         self.gamma = gamma
@@ -102,11 +106,11 @@ class PPOAgent:
             log_prob = action_dist.log_prob(_action)
 
             action = self.action_space[_action.item()]
-            return action, log_prob.item()
+            return action, log_prob.item(), logits
         else:
             _action = torch.argmax(logits, dim=-1)
             action = self.action_space[_action.item()]
-            return action, None
+            return action, None, None
 
 
     def clip_loss_ftn(self, advantage, old_prob, current_prob):
@@ -139,7 +143,7 @@ class PPOAgent:
         - GAE를 사용하면 bias-variance trade-off를 조절할 수 있다.
         '''
         # set memory
-        states, _, rewards, next_states, dones, _, _ = zip(*memory)
+        states, _, rewards, next_states, dones, _, _, _, _, _ = zip(*memory)
 
         # zip again to separate ts / agent
         ts_states, ag_states = zip(*states)
@@ -195,7 +199,7 @@ class PPOAgent:
         indices = random.sample(range(len(memory)), self.batch_size)
         sampled_memory = [memory[i] for i in indices]
 
-        states, actions, rewards, next_states, dones, old_log_probs, masks = zip(*sampled_memory)
+        states, actions, rewards, next_states, dones, old_log_probs, masks, entry_masks, entry_scores, log_policy = zip(*sampled_memory)
         advantages = advantage[indices].to(self.device)
 
         # zip again to separate ts / agent
@@ -216,12 +220,15 @@ class PPOAgent:
         dones = torch.cat(dones).to(self.device)
         old_log_probs = torch.cat(old_log_probs).unsqueeze(1).to(self.device)
         masks = torch.cat(masks).to(self.device)
+        entry_masks = torch.cat(entry_masks).to(self.device)
+        entry_scores = torch.cat(entry_scores).to(self.device)
+        log_policies = torch.cat(log_policy).to(self.device)
 
         # invert action indices
         offset = -self.action_space[0]          # ex : -(-5) = 5
         actions = (actions + offset).to(self.device)  
 
-        return states, actions, rewards, next_states, dones, old_log_probs, advantages, masks
+        return states, actions, rewards, next_states, dones, old_log_probs, advantages, masks, entry_masks, entry_scores, log_policies
 
 
     def train(self, memory, advantage):
@@ -242,7 +249,7 @@ class PPOAgent:
 
         for _ in range(self.epoch):
             # set memory
-            states, actions, rewards, next_states, dones, old_log_probs, advantages, masks = self.sample_memory(memory, advantage)
+            states, actions, rewards, next_states, dones, old_log_probs, advantages, masks, entry_masks, entry_scores, log_policies = self.sample_memory(memory, advantage)
 
             # get current values 
             self.model.train()
@@ -257,16 +264,47 @@ class PPOAgent:
             current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
             current_probs = current_log_probs.exp()
 
+            # KL Divergence 
+            # [1] 현재 롱 숏 방향 분포 
+            position_cap = self.n_actions // 2
+
+            current_policy_logit = current_logits.exp()
+            entry_probs = current_policy_logit[entry_masks]
+
+            short_probs = entry_probs[:, :position_cap].sum(dim=1)
+            long_probs = entry_probs[:, position_cap:].sum(dim=1)
+
+            total_probs = torch.stack([short_probs, long_probs], dim=1)
+            sum_probs = total_probs.sum(dim=1, keepdim=True).clamp_min(1e-8)
+            current_entry_policy = total_probs / sum_probs
+
+            # [2] 상태별 트렌드 점수 s_t
+            s = entry_scores[entry_masks]
+            p_long = torch.sigmoid(self.kappa * s)
+            p_target = torch.cat([1-p_long, p_long], dim=1)
+
+            # [3] 극단치 방지를 위해 uniform prior와 섞음 
+            p_mix = self.beta * 0.5 + (1-self.beta) * p_target
+
+            # [4] trend가 확실하다면 규제를 약화 
+            w = torch.sigmoid(-self.regulation * torch.abs(s)).detach()
+
+            # [5] KL( 현재 정책 | 타깃 혼합 분포 )
+            policy_safe = current_entry_policy.clamp_min(1e-8)
+            p_mix_safe = p_mix.clamp_min(1e-8)
+            kl = (policy_safe * (policy_safe.log() - p_mix_safe.log())).sum(dim=1)
+            entry_reg = (w * kl).mean() 
+
             # 3 elements of loss : value_loss, clip_loss, entropy bonus 
             with torch.no_grad():
                 _, next_values = self.model(next_states)
                 value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
             value_loss = self.critic_loss_ftn(values.squeeze(), value_target.detach())
-            clip_loss = self.clip_loss_ftn(advantages, old_log_probs.exp(), current_probs)
+            clip_loss = self.clip_loss_ftn(advantages.detach(), old_log_probs.exp().detach(), current_probs)
             entropy = action_dist.entropy().mean()
 
-            total_loss = -clip_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy
+            total_loss = -clip_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy + self.lambda_entry * entry_reg
 
             losses += total_loss.item()
 
@@ -275,7 +313,7 @@ class PPOAgent:
             total_loss.backward()
             self.optimizer.step()
 
-            return losses / self.epoch
+        return losses / self.epoch
         
 
     def load_model(self, state_dict):
@@ -288,12 +326,12 @@ class DecoupledPPOAgent(PPOAgent):
     def __init__(self, action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, device, lam=0.98):
         super().__init__(action_space, n_actions, model, value_coeff, entropy_coeff, clip_eps, gamma, lr, batch_size, epoch, device, lam)
 
-        shared_params = list(self.model.shared.parameters())
-        actor_params = list(self.model.actor.parameters())
-        critic_params = list(self.model.critic.parameters())
+        self.shared_params = list(self.model.shared.parameters())
+        self.actor_params = list(self.model.actor.parameters())
+        self.critic_params = list(self.model.critic.parameters())
 
-        self.actor_optimizer = torch.optim.Adam(shared_params + actor_params, lr=self.lr)
-        self.critic_optimizer = torch.optim.Adam(shared_params + critic_params, lr=self.lr)
+        self.actor_optimizer = torch.optim.Adam(self.shared_params + self.actor_params, lr=self.lr)
+        self.critic_optimizer = torch.optim.Adam(self.shared_params + self.critic_params, lr=self.lr)
 
     def train(self, memory, advantage):
         if len(memory) < self.batch_size:
@@ -302,7 +340,7 @@ class DecoupledPPOAgent(PPOAgent):
         total_loss_sum = 0.0
 
         for _ in range(self.epoch):
-            states, actions, rewards, next_states, dones, old_log_probs, advantages, masks = self.sample_memory(memory, advantage)
+            states, actions, rewards, next_states, dones, old_log_probs, advantages, masks, entry_masks, entry_scores, log_policies = self.sample_memory(memory, advantage)
 
             self.model.train()
             current_logits, values = self.model(states)
@@ -318,23 +356,64 @@ class DecoupledPPOAgent(PPOAgent):
                 _, next_values = self.model(next_states)
                 value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
+            # KL Divergence 
+            # [1] 현재 롱 숏 방향 분포 
+            if entry_masks.sum() == 0:
+                entry_reg = torch.tensor(0.0, device=self.device)
+            else:
+                position_cap = self.n_actions // 2
+                # if sum(entry_masks) == 0:
+                current_policy_logit = current_logits.exp()
+                entry_probs = current_policy_logit[entry_masks]
+
+                short_probs = entry_probs[:, :position_cap].sum(dim=1, keepdim=True)
+                long_probs = entry_probs[:, position_cap:].sum(dim=1, keepdim=True)
+
+                total_probs = torch.cat([short_probs, long_probs], dim=1)
+
+                sum_probs = total_probs.sum(dim=1, keepdim=True).clamp_min(1e-8)
+                current_entry_policy = total_probs / sum_probs
+
+                # [2] 상태별 트렌드 점수 s_t
+                s = entry_scores[entry_masks]
+                p_long = torch.sigmoid(self.kappa * s)
+                p_target = torch.stack([1-p_long, p_long], dim=1)
+
+                # [3] 극단치 방지를 위해 uniform prior와 섞음 
+                p_mix = self.beta * 0.5 + (1-self.beta) * p_target
+
+                # [4] trend가 확실하다면 규제를 약화 
+                w = torch.sigmoid(-self.regulation * torch.abs(s)).detach()
+
+                # [5] KL( 현재 정책 | 타깃 혼합 분포 )
+                policy_safe = current_entry_policy.clamp_min(1e-8)
+                p_mix_safe = p_mix.clamp_min(1e-8)
+                kl = (policy_safe * (policy_safe.log() - p_mix_safe.log())).sum(dim=1)
+
+                entry_reg = (w * kl).mean() 
+
             # Critic loss (MSE)
             critic_loss = self.value_coeff * self.critic_loss_ftn(values.squeeze(), value_target.detach())
 
+            # critic update 
+            self.critic_optimizer.zero_grad()
+            critic_loss.backward()
+            # nn.utils.clip_grad_norm_(self.critic_params, max_grad_norm)
+            self.critic_optimizer.step()
+
             # Actor loss (clipped PPO surrogate)
-            clip_loss = self.clip_loss_ftn(advantages, old_log_probs.exp(), current_probs)
+            clip_loss = self.clip_loss_ftn(advantages.detach(), old_log_probs.exp().detach(), current_probs)
             entropy = action_dist.entropy().mean()
-            actor_loss = -clip_loss - self.entropy_coeff * entropy
+            actor_loss = -clip_loss - self.entropy_coeff * entropy + self.lambda_entry * entry_reg
 
             # Sum loss for tracking
-            total_loss = actor_loss + critic_loss
+            total_loss = actor_loss + critic_loss 
             total_loss_sum += total_loss.item()
 
             # Backprop & update
             self.actor_optimizer.zero_grad()
-            self.critic_optimizer.zero_grad()
-            total_loss.backward()
+            actor_loss.backward()
+            # nn.utils.clip_grad_norm_(self.actor_params, max_grad_norm)
             self.actor_optimizer.step()
-            self.critic_optimizer.step()
 
         return total_loss_sum / self.epoch
