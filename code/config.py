@@ -4,7 +4,7 @@ import torch.optim as optim
 
 from datahandler.scaler import *
 from agent.PPOAgent_ms import *
-from models.CTTS import *
+from models.DLinear_RL import *
 
 from trainer.Episodic import *
 from trainer.GoalOrTimeoutTrainer import *
@@ -99,6 +99,8 @@ target_values = ['close', 'high', 'low', 'volume_change',
                 'atr', 'bb_width',
                 'obv']
 
+pred_len_list = [2,4,6,8,10,12,14,16,18,20,30]
+
 # target_values = ['close', 'high', 'low',
 #                 'ema_5', 'ema_20', 
 #                 'rsi', 'volume_change']     
@@ -111,9 +113,9 @@ CONFIG = EasyDict({
     # main component. 
     'TRAINER': GOTNonEpisodicTrainer, 
     'ENV': GoalOrTimeoutEnv, 
-    'AGENT': DecoupledPPOAgent,
+    'AGENT': PPOAgent,
     'NETWORK': RegimeAwareMultiStatePV,
-    'REWARD_FTN': GOT_pnl_reward_log, 
+    'REWARD_FTN': GOT_log_reward_postpenalty, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
     'PATH': 'logs/GOT/log_reward',  # '../logs/RobustDivertedNonepi'
@@ -143,14 +145,13 @@ CONFIG = EasyDict({
     # 모델 설정
     'INPUT_DIM': len(target_values),
     'AGENT_INPUT_DIM': 7,
-    'EMBED_DIM': 32,
-    'KERNEL_SIZE': 4,
-    'STRIDE': 1,
+    'KERNEL_SIZE':11,
+    'PRED_LEN_LIST':pred_len_list,
     'AGENT_HIDDEN_DIM': 32,
     'AGENT_OUT_DIM': 32,
     'FUSION_HIDDEN_DIM': 64,
-    'NUM_LAYERS': 3,
-    'NUM_HEADS': 4,
+    'NUM_HEADS': len(pred_len_list),
+    'METADATA': False,
     'D_FF': 64,
     'DROPOUT': 0.1,
 

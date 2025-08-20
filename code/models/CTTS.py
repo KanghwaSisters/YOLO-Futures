@@ -295,8 +295,8 @@ class BasicFusion(nn.Module):
 
     def forward(self, x):
         ts_state, agent_state = x
-
-        ts_out = self.timeseries_block(ts_state)       # (B, embed_dim)
+        
+        ts_out = self.timeseries_block(ts_state)        # (B, embed_dim)
         agent_out = self.agent_block(agent_state)      # (B, agent_out_dim)
 
         fused = torch.cat([ts_out, agent_out], dim=1)  # (B, embed + agent_out)
