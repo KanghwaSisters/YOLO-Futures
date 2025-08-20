@@ -19,99 +19,62 @@ class TimeFeatureGenerator(nn.Module):
         self.freq = freq
 
     def forward(self, batch_size: int, seq_len: int, device: torch.device | str, dates=None):
-        """
-        Args:
-            batch_size: 배치 크기
-            seq_len: 시퀀스 길이  
-            device: 디바이스
-            dates: 실제 날짜 데이터 (pandas.DatetimeIndex 또는 None)
-        
-        Returns:
-            torch.Tensor: (batch_size, seq_len, time_dim) 형태의 시간 특성
-        """
+        # 날짜 지정 안되면 batch 공통, 벡터화해 생성
         if dates is None:
-            # 더미 날짜 생성 (현재 시간부터 시작)
             start_date = pd.Timestamp.now()
-            dates = pd.date_range(start=start_date, periods=seq_len, freq=self.freq)
-        
-        # 단일 날짜 시퀀스인 경우 모든 배치에 복사
-        if not isinstance(dates, list) or len(dates) != batch_size:
-            dates = [dates] * batch_size
-        
-        batch_features = []
-        for batch_idx in range(batch_size):
-            batch_dates = dates[batch_idx]
-            if not isinstance(batch_dates, pd.DatetimeIndex):
-                batch_dates = pd.DatetimeIndex(batch_dates)
-            
-            # DataFrame 형태로 만들어서 time_features 함수 사용
-            df_dates = pd.DataFrame({'date': batch_dates})
-            
-            # 기존 time_features 함수 활용 (timeenc=1로 정규화된 특성 사용)
-            time_feat = time_features(df_dates, timeenc=1, freq=self.freq)
-            
-            # 차원 맞추기: time_feat.shape = (seq_len, actual_features)
-            actual_dim = time_feat.shape[1]
-            
-            if actual_dim == self.time_dim:
-                # 차원이 정확히 맞는 경우
-                features = time_feat
-            elif actual_dim > self.time_dim:
-                # 차원이 더 큰 경우 앞에서부터 필요한 만큼만 사용
-                features = time_feat[:, :self.time_dim]
-            else:
-                # 차원이 작은 경우 0으로 패딩
-                padding = np.zeros((seq_len, self.time_dim - actual_dim))
-                features = np.concatenate([time_feat, padding], axis=1)
-            
-            batch_features.append(features)
-        
-        # numpy array를 tensor로 변환
-        time_features_tensor = torch.tensor(np.array(batch_features), dtype=torch.float32, device=device)
-        
-        return time_features_tensor
+            # batch별 개별로 다르게 생성할 필요 없는 경우, 한 번만 만들고 복사
+            base_dates = pd.date_range(start=start_date, periods=seq_len, freq=self.freq)
+            dates = [base_dates] * batch_size
+        elif not isinstance(dates, list) or len(dates) != batch_size:
+            dates = [pd.DatetimeIndex(dates)] * batch_size
+        # (여기서 dates: list of DatetimeIndex)
+
+        # -- 여기서 time_features(기존) 호출 전에 batch concat 하여 한 번에 처리 --
+        all_dates = np.concatenate(dates, axis=0)
+        df_dates = pd.DataFrame({'date': all_dates})
+        raw_features = time_features(df_dates, timeenc=1, freq=self.freq)
+
+        # (batch_size*seq_len, time_dim) -> (batch_size, seq_len, time_dim)
+        features = raw_features.reshape(batch_size, seq_len, -1)
+        actual_dim = features.shape[2]
+
+        # 차원 맞추기 (broadcasting)
+        if actual_dim < self.time_dim:
+            # 마지막 차원 패딩
+            pad = np.zeros((batch_size, seq_len, self.time_dim - actual_dim), dtype=features.dtype)
+            features = np.concatenate([features, pad], axis=2)
+        elif actual_dim > self.time_dim:
+            features = features[:, :, :self.time_dim]
+
+        # torch tensor 변환 + device 할당
+        features_tensor = torch.tensor(features, dtype=torch.float32, device=device)
+        return features_tensor
 
     def from_dataloader_timestamps(self, timestamps, batch_size, seq_len, device):
-        """
-        데이터로더에서 받은 timestamp 데이터를 처리
-        
-        Args:
-            timestamps: 데이터로더에서 받은 timestamp 배열 (numpy array 또는 tensor)
-            batch_size: 배치 크기
-            seq_len: 시퀀스 길이
-            device: 디바이스
-        
-        Returns:
-            torch.Tensor: 시간 특성 텐서
-        """
         if isinstance(timestamps, torch.Tensor):
             timestamps = timestamps.cpu().numpy()
-        
-        # timestamps 형태 확인 및 처리
         if len(timestamps.shape) == 1:
-            # 1D 배열인 경우
-            if len(timestamps) >= batch_size * seq_len:
-                timestamps = timestamps[:batch_size * seq_len].reshape(batch_size, seq_len)
-            else:
-                # 길이가 부족한 경우 반복
-                timestamps = np.tile(timestamps, (batch_size * seq_len // len(timestamps) + 1))[:batch_size * seq_len].reshape(batch_size, seq_len)
+            if len(timestamps) < batch_size * seq_len:
+                timestamps = np.tile(timestamps, (batch_size * seq_len // len(timestamps) + 1))[:batch_size * seq_len]
+            timestamps = timestamps.reshape(batch_size, seq_len)
         elif len(timestamps.shape) == 2:
-            # 이미 (batch_size, seq_len) 형태인 경우
             timestamps = timestamps[:batch_size, :seq_len]
-        
-        # 숫자형 timestamp를 datetime으로 변환
-        if timestamps.dtype.kind in ['i', 'u', 'f']:  # integer, unsigned, float
-            timestamps = pd.to_datetime(timestamps.flatten(), unit='s').values.reshape(batch_size, seq_len)
-        
-        # 각 배치별로 DatetimeIndex 생성하여 처리
-        dates_list = []
-        for batch_idx in range(batch_size):
-            dates_list.append(pd.DatetimeIndex(timestamps[batch_idx]))
-        
-        return self.forward(batch_size, seq_len, device, dates=dates_list)
+        if timestamps.dtype.kind in ['i', 'u', 'f']:
+            # 일괄 변환
+            timestamps_flat = timestamps.flatten()
+            dates_flat = pd.to_datetime(timestamps_flat, unit='s')
+            batch_dates = []
+            for i in range(batch_size):
+                batch_dates.append(dates_flat[i*seq_len:(i+1)*seq_len])
+        else:
+            batch_dates = []
+            for i in range(batch_size):
+                batch_dates.append(pd.DatetimeIndex(timestamps[i]))
+        # 여기서 batch_dates는 list of DatetimeIndex or list of Timestamps
+        return self.forward(batch_size, seq_len, device, batch_dates)
 
 
-# ---- Value signal extractor (그대로 사용) ----
+# ---- Value signal extractor ----
 class ValueSignalExtractor(nn.Module):
     def __init__(self):
         super().__init__()

@@ -39,7 +39,7 @@ CONFIG = EasyDict({
     'REWARD_FTN': GOT_pnl_reward_log, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
-    'PATH': 'logs/GOT/112',
+    'PATH': 'logs/GOT/114',
     'DATASET_PATH': 'data/processed/kospi200_ffill_clean_version.pkl',
 
     # 기본 설정
@@ -92,5 +92,5 @@ CONFIG = EasyDict({
     'MA_INTERVAL': 50,
     'SAVE_INTERVAL': 10,
     'PRINT_LOG_INTERVAL': 1,
-    'PRINT_ENV_LOG_INTERVAL': 500
+    'PRINT_ENV_LOG_INTERVAL': 30
 })
