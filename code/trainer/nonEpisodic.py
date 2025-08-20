@@ -286,7 +286,7 @@ class NonEpisodicTrainer:
                     break
                 mask = env.mask
 
-                action, log_prob = agent.get_action(state, mask)
+                action, log_prob, log_policy = agent.get_action(state, mask)
                 next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
 
@@ -432,7 +432,7 @@ class NonEpisodicTrainer:
                     break
                 mask = env.mask
 
-                action, _ = agent.get_action(state, mask)
+                action, _, _ = agent.get_action(state, mask)
                 next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
 
@@ -615,7 +615,7 @@ class HorizonBoundNonEpisodicTrainer(NonEpisodicTrainer):
                     break
                 mask = env.mask
 
-                action, log_prob = agent.get_action(state, mask)
+                action, log_prob, log_policy = agent.get_action(state, mask)
                 next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
 
@@ -771,7 +771,7 @@ class HorizonBoundNonEpisodicTrainer(NonEpisodicTrainer):
                     break
                 mask = env.mask
 
-                action, _ = agent.get_action(state, mask)
+                action, _, _ = agent.get_action(state, mask)
                 next_state, reward, done = env.step(action)
                 current_position, execution_strength = self.split_position_strength(action)
 
