@@ -114,11 +114,11 @@ CONFIG = EasyDict({
     'TRAINER': GOTNonEpisodicTrainer, # GOTRandomTrainer, 
     'ENV': GoalOrTimeoutEnv, # GOTRandomEnv, 
     'AGENT': PPOAgent,
-    'NETWORK': MultiStatePV, # RegimeAwareMultiStatePV, # MultiStatePV,
+    'NETWORK': MultiStatePV, # RegimeAwareMultiStatePV, 
     'REWARD_FTN': hybrid_reward, # GOT_log_reward_postpenalty, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
-    'PATH': 'logs/GOT_KL_hybrid/28_scaling_regimeAware',  # Random_28_scaling # '../logs/RobustDivertedNonepi'
+    'PATH': 'logs/GOT_KL_hybrid/55_scaling_MultiStatePV',  # Random_28_scaling # '../logs/RobustDivertedNonepi'
     'DATASET_PATH': 'data/processed/kospi200_ffill_clean_version.pkl', # ../data/processed/kospi200_ffill_clean_version.pkl
 
     # 기본 설정
