@@ -77,7 +77,7 @@ from utils.setDevice import *
 # - Actor와 Critic을 구분해 별도의 옵티마이저를 사용한다. 
 # 단, 역전파는 통합 loss를 이용한다. 
 # ===================================================================================
-# [ 07 ] Model   
+# [ 06 ] Model   
 # ===================================================================================
 # ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼ CTTS ▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼▼
 # 1. MultiStatePV 
@@ -111,21 +111,21 @@ device = get_device()
 
 CONFIG = EasyDict({
     # main component. 
-    'TRAINER': GOTRandomTrainer, 
-    'ENV': GOTRandomEnv, 
+    'TRAINER': GOTNonEpisodicTrainer, # GOTRandomTrainer, 
+    'ENV': GoalOrTimeoutEnv, # GOTRandomEnv, 
     'AGENT': DecoupledPPOAgent,
-    'NETWORK': DropRegimeNet,
-    'REWARD_FTN': GOT_log_reward_postpenalty, 
+    'NETWORK': RegimeAwareMultiStatePV,
+    'REWARD_FTN': hybrid_reward, # GOT_log_reward_postpenalty, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
-    'PATH': 'logs/GOT/log_post_Drop',  # '../logs/RobustDivertedNonepi'
+    'PATH': 'logs/GOT_KL_hybrid/28_scaling_mdc',  # Random_28_scaling # '../logs/RobustDivertedNonepi'
     'DATASET_PATH': 'data/processed/kospi200_ffill_clean_version.pkl', # ../data/processed/kospi200_ffill_clean_version.pkl
 
     # 기본 설정
     'DEVICE': device,
     'START_BUDGET': 30_000_000,
     'WINDOW_SIZE': 80,
-    'N_GROUP': 15,
+    'N_GROUP': 15,  # 15
     'POSITION_CAP': position_cap,
     'TARGET_VALUES': target_values,
     'TRAIN_VALID_TIMESTEP': None, 
@@ -135,7 +135,7 @@ CONFIG = EasyDict({
     'N_ACTIONS': 1+2*position_cap,
     'ACTION_SPACE': list(range(-position_cap, position_cap+1)),
     'GAMMA': 0.99,
-    'LR': 3e-4,
+    'LR': 0.00025, # 3e-4,
     'VALUE_COEFF': 0.5,
     'ENTROPY_COEFF': 0.05,
     'CLIP_EPS': 0.2,
@@ -157,10 +157,10 @@ CONFIG = EasyDict({
     'DROPOUT': 0.1,
 
     # 학습 관련
-    'N_ITERATION' : 4_000,
+    'N_ITERATION' : 1_000,
     'N_STEPS': 2048,
     'MA_INTERVAL': 50,
     'SAVE_INTERVAL': 10,
     'PRINT_LOG_INTERVAL': 1,
-    'PRINT_ENV_LOG_INTERVAL': 500
+    'PRINT_ENV_LOG_INTERVAL': 30
 })
