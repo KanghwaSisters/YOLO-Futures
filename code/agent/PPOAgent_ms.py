@@ -281,7 +281,7 @@ class PPOAgent:
             # [2] 상태별 트렌드 점수 s_t
             s = entry_scores[entry_masks]
             p_long = torch.sigmoid(self.kappa * s)
-            p_target = torch.cat([1-p_long, p_long], dim=1)
+            p_target = torch.stack([1-p_long, p_long], dim=1)
 
             # [3] 극단치 방지를 위해 uniform prior와 섞음 
             p_mix = self.beta * 0.5 + (1-self.beta) * p_target

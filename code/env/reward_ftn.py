@@ -459,9 +459,6 @@ def hybrid_reward(w_profit=2,
         # LOG without problems 
         return np.sign(value) * np.log1p(abs(value))
 
-    # 초기 자산 
-    init_budget = kwargs['initial_budget']
-
     # 종가를 기준으로, 포트폴리오 수익률 지표 
     # 현재 포트폴리오 가치 = 보유 현금 + 미실현 손익 
     portfolio_value = log(kwargs['current_balance']) - log(kwargs['previous_balance'])

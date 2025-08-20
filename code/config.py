@@ -113,12 +113,12 @@ CONFIG = EasyDict({
     # main component. 
     'TRAINER': GOTNonEpisodicTrainer, # GOTRandomTrainer, 
     'ENV': GoalOrTimeoutEnv, # GOTRandomEnv, 
-    'AGENT': DecoupledPPOAgent,
-    'NETWORK': RegimeAwareMultiStatePV,
+    'AGENT': PPOAgent,
+    'NETWORK': MultiStatePV, # RegimeAwareMultiStatePV, # MultiStatePV,
     'REWARD_FTN': hybrid_reward, # GOT_log_reward_postpenalty, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
-    'PATH': 'logs/GOT_KL_hybrid/28_scaling_mdc',  # Random_28_scaling # '../logs/RobustDivertedNonepi'
+    'PATH': 'logs/GOT_KL_hybrid/28_scaling_regimeAware',  # Random_28_scaling # '../logs/RobustDivertedNonepi'
     'DATASET_PATH': 'data/processed/kospi200_ffill_clean_version.pkl', # ../data/processed/kospi200_ffill_clean_version.pkl
 
     # 기본 설정
@@ -144,7 +144,7 @@ CONFIG = EasyDict({
 
     # 모델 설정
     'INPUT_DIM': len(target_values),
-    'AGENT_INPUT_DIM': 7,
+    'AGENT_INPUT_DIM': 8,
     'EMBED_DIM': 32,
     'KERNEL_SIZE': 4,
     'STRIDE': 1,
