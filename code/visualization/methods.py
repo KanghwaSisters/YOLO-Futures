@@ -264,34 +264,49 @@ def plot_training_curves(ax, train_rewards, train_losses):
     
     ax.grid(True, alpha=0.3)
 
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
 
 def plot_action_distribution_heatmap(ax, timesteps, actions, n_actions=21):
-    """액션 분포 히트맵 - 시간에 따른 액션 선택 패턴 (실제 액션 값 기준)"""
+    """액션 분포 히트맵 - Hold(0) 액션 제외하고 시각화"""
     # 액션 범위 계산: n_actions=21이면 -10~+10
     action_center = n_actions // 2  # 10 (hold 액션)
     min_action = -action_center     # -10
     max_action = action_center      # +10
 
+    # Hold 액션(0) 제외한 액션들만 필터링
+    filtered_actions = [action for action in actions if action != 0]
+    filtered_timesteps = []
+    
+    # Hold가 아닌 액션의 해당 타임스탬프도 함께 필터링
+    for i, action in enumerate(actions):
+        if action != 0 and i < len(timesteps):
+            filtered_timesteps.append(timesteps[i])
+    
+    if len(filtered_actions) == 0:
+        ax.text(0.5, 0.5, 'No non-hold actions found', 
+                transform=ax.transAxes, ha='center', va='center')
+        return
+
     # 액션을 시간 구간별로 그룹화
-    n_time_bins = min(50, len(actions) // 10)  # 최대 50개 구간
+    n_time_bins = min(50, len(filtered_actions) // 10)  # 최대 50개 구간
     if n_time_bins < 5:
-        n_time_bins = min(10, len(actions))
+        n_time_bins = min(10, len(filtered_actions))
 
-    time_bins = np.array_split(range(len(actions)), n_time_bins)
+    time_bins = np.array_split(range(len(filtered_actions)), n_time_bins)
 
-    # 실제 액션 값별 카운트 (인덱스가 아닌 실제 값)
-    action_counts = np.zeros((n_time_bins, n_actions))
+    # Hold 제외한 액션 값들의 범위 계산
+    unique_actions = sorted(set(filtered_actions))
+    action_to_idx = {action: i for i, action in enumerate(unique_actions)}
+    n_unique_actions = len(unique_actions)
+
+    # 실제 액션 값별 카운트
+    action_counts = np.zeros((n_time_bins, n_unique_actions))
 
     for i, time_bin in enumerate(time_bins):
         if len(time_bin) > 0:
-            bin_actions = [actions[j] for j in time_bin]
+            bin_actions = [filtered_actions[j] for j in time_bin]
             for raw_action in bin_actions:
-                # 실제 액션 값을 인덱스로 변환 (예: -10 → 0, 0 → 10, +10 → 20)
-                action_idx = raw_action + action_center
-                if 0 <= action_idx < n_actions:
+                if raw_action in action_to_idx:
+                    action_idx = action_to_idx[raw_action]
                     action_counts[i, action_idx] += 1
 
     # 정규화 (각 시간 구간의 합이 1이 되도록)
@@ -299,63 +314,67 @@ def plot_action_distribution_heatmap(ax, timesteps, actions, n_actions=21):
     row_sums[row_sums == 0] = 1  # 0으로 나누기 방지
     action_probs = action_counts / row_sums
 
-    extent = [0, action_probs.shape[0], min_action - 0.5, max_action + 0.5]
-
     # 히트맵 그리기
     im = ax.imshow(
         action_probs.T,
         aspect='auto',
-        cmap='Greys',
+        cmap='RdYlBu_r',  # Hold가 없으니 더 다채로운 컬러맵 사용
         interpolation='nearest',
         origin='lower',
-        extent=extent
+        extent=[0, n_time_bins, -0.5, n_unique_actions - 0.5]
     )
 
     # 축 레이블 설정
-    ax.set_xlabel('Time Periods')
+    ax.set_xlabel('Time Periods (Non-Hold Actions Only)')
     ax.set_ylabel('Action Value')
-    ax.set_title('Action Distribution Heatmap Over Time (Action Values)')
+    ax.set_title('Action Distribution Heatmap (Excluding Hold Actions)')
 
     # x축: 시간 구간별 대표 타임스탬프
-    if len(timesteps) > 0:
+    if len(filtered_timesteps) > 0:
         time_labels = []
-        for time_bin in time_bins[::max(1, len(time_bins)//6)]:  # 최대 6개 레이블
-            if len(time_bin) > 0:
-                mid_idx = time_bin[len(time_bin)//2]
-                if mid_idx < len(timesteps):
-                    time_labels.append(pd.to_datetime(timesteps[mid_idx]).strftime('%m-%d'))
-                else:
-                    time_labels.append('')
+        sample_indices = np.linspace(0, len(filtered_timesteps)-1, 
+                                   min(6, len(filtered_timesteps))).astype(int)
         
-        tick_positions = np.linspace(0, len(time_bins), len(time_labels))
+        for idx in sample_indices:
+            if idx < len(filtered_timesteps):
+                time_labels.append(pd.to_datetime(filtered_timesteps[idx]).strftime('%m-%d'))
+        
+        tick_positions = np.linspace(0, n_time_bins, len(time_labels))
         ax.set_xticks(tick_positions)
         ax.set_xticklabels(time_labels, rotation=45)
 
-    # y축: 실제 액션 값으로 표시
-    important_action_values = [min_action, -5, 0, 5, max_action]
-    ax.set_yticks(important_action_values)
-    ax.set_yticklabels([f'{val:+d}' if val != 0 else '0(Hold)' for val in important_action_values])
+    # y축: 실제 액션 값으로 표시 (Hold 제외)
+    ax.set_yticks(range(n_unique_actions))
+    ax.set_yticklabels([f'{action:+d}' for action in unique_actions])
 
     # 컬러바 추가
     cbar = plt.colorbar(im, ax=ax, shrink=0.8)
     cbar.set_label('Action Probability', rotation=270, labelpad=20)
 
-    # 중요한 액션 영역 표시
-    # Hold 영역 (0 근처)
-    ax.axhline(0 - 0.5, color='blue', linestyle='--', alpha=0.5, linewidth=1)
-    ax.axhline(0 + 0.5, color='blue', linestyle='--', alpha=0.5, linewidth=1)
-    ax.text(len(time_bins)*0.02, 0, 'HOLD(0)', 
-           bbox=dict(boxstyle='round,pad=0.2', facecolor='lightgreen', alpha=0.7),
-           fontsize=8)
+    # Short/Long 영역 구분선
+    negative_count = sum(1 for action in unique_actions if action < 0)
+    if negative_count > 0 and negative_count < len(unique_actions):
+        separation_line = negative_count - 0.5
+        ax.axhline(separation_line, color='black', linestyle='-', alpha=0.8, linewidth=2)
+        
+        # 영역 표시
+        if negative_count > 0:
+            ax.text(n_time_bins*0.02, negative_count/2 - 0.5, 'SHORT(-)',
+                   bbox=dict(boxstyle='round,pad=0.2', facecolor='lightblue', alpha=0.7),
+                   fontsize=8)
+        
+        if negative_count < len(unique_actions):
+            ax.text(n_time_bins*0.02, negative_count + (len(unique_actions)-negative_count)/2 - 0.5, 
+                   'LONG(+)',
+                   bbox=dict(boxstyle='round,pad=0.2', facecolor='lightcoral', alpha=0.7),
+                   fontsize=8)
 
-    # Short 영역 (음수)
-    ax.axhspan(min_action - 0.5, -0.5, alpha=0.1, color='blue', label='Short Zone')
-    ax.text(len(time_bins)*0.02, min_action + 2.5, 'SHORT(-)', 
-           bbox=dict(boxstyle='round,pad=0.2', facecolor='lightblue', alpha=0.7),
-           fontsize=8)
-
-    # Long 영역 (양수)
-    ax.axhspan(0.5, max_action + 0.5, alpha=0.1, color='red', label='Long Zone')
-    ax.text(len(time_bins)*0.02, max_action - 2.5, 'LONG(+)', 
-           bbox=dict(boxstyle='round,pad=0.2', facecolor='lightcoral', alpha=0.7),
+    # 통계 정보 추가
+    total_actions = len(actions)
+    hold_actions = total_actions - len(filtered_actions)
+    hold_percentage = (hold_actions / total_actions * 100) if total_actions > 0 else 0
+    
+    ax.text(0.98, 0.02, f'Hold actions excluded: {hold_actions} ({hold_percentage:.1f}%)\nShowing: {len(filtered_actions)} actions',
+           transform=ax.transAxes, ha='right', va='bottom',
+           bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8),
            fontsize=8)
