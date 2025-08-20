@@ -395,12 +395,6 @@ class DecoupledPPOAgent(PPOAgent):
             # Critic loss (MSE)
             critic_loss = self.value_coeff * self.critic_loss_ftn(values.squeeze(), value_target.detach())
 
-            # critic update 
-            self.critic_optimizer.zero_grad()
-            critic_loss.backward()
-            # nn.utils.clip_grad_norm_(self.critic_params, max_grad_norm)
-            self.critic_optimizer.step()
-
             # Actor loss (clipped PPO surrogate)
             clip_loss = self.clip_loss_ftn(advantages.detach(), old_log_probs.exp().detach(), current_probs)
             entropy = action_dist.entropy().mean()
@@ -412,8 +406,11 @@ class DecoupledPPOAgent(PPOAgent):
 
             # Backprop & update
             self.actor_optimizer.zero_grad()
-            actor_loss.backward()
+            self.critic_optimizer.zero_grad()
+            total_loss.backward()
+            # nn.utils.clip_grad_norm_(self.critic_params, max_grad_norm)
             # nn.utils.clip_grad_norm_(self.actor_params, max_grad_norm)
+            self.critic_optimizer.step()
             self.actor_optimizer.step()
 
         return total_loss_sum / self.epoch

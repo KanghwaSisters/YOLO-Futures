@@ -451,8 +451,8 @@ def reward_per_equity(**kwargs):
 
 DSR = DifferentialSharpeRatio()
 
-def hybrid_reward(w_profit=2,
-                  w_risk=8,
+def hybrid_reward(w_profit=5,
+                  w_risk=5,
                   scaling_factor=50_000,
                   **kwargs):
     def log(value):
