@@ -5,7 +5,7 @@ import pickle
 import warnings
 
 # from easydict import EasyDict
-from config import CONFIG
+from config_DLinear import CONFIG
 
 from env.BasicEnv import *
 from state.state import *
