@@ -61,7 +61,8 @@ class FuturesEnvironment:
         self.previous_price = None
         self.contract_unit = 50000  # 미니 선물 계약 단위
         self.current_timestep = date_range[0]
-        self.max_step = 5_000
+        self.max_step = 3_000
+        self.since_entry = 0
         
         # 만기일 계산
         mask = self._full_df.index >= pd.to_datetime(self._date_range[0])
@@ -166,6 +167,18 @@ class FuturesEnvironment:
                 mask[-restriction:] = 0
 
         return mask.tolist()
+
+    def get_score(self):
+        """ score """
+        df = self.dataset.cleaned_df
+        current_idx = df.index.get_loc(self.current_timestep)
+        price_data = df['score'].iloc[current_idx]
+        return price_data
+
+    def get_log_return(self):
+        df = self.dataset.cleaned_df
+        current_idx = df.index.get_loc(self.current_timestep)
+        return df['log_return'].iloc[current_idx]
 
     def _slice_by_date(self, full_df: pd.DataFrame, date_range: tuple) -> pd.DataFrame:
         """날짜 범위로 데이터프레임 슬라이싱"""
@@ -302,6 +315,8 @@ class FuturesEnvironment:
         self.account.net_realized_pnl = 0
         self.account.net_realized_pnl_without_cost = 0
 
+        previous_balance = self.account.available_balance + self.account.unrealized_pnl
+
         # 1. 다음 데이터 가져오기
         next_fixed_state, close_price, next_timestep = next(self.data_iterator)
         current_price = close_price
@@ -425,7 +440,13 @@ class FuturesEnvironment:
             current_position=self.account.current_position,
             execution_strength=self.account.execution_strength,
             equity=self.account.available_balance,
-            initial_budget=self.account.initial_budget
+            initial_budget=self.account.initial_budget,
+            since_entry=self.since_entry,
+            score=self.get_score(),
+            max_step=self.max_step,
+            current_step=self.maintained_steps,
+            previous_balance=previous_balance,
+            current_balance=self.account.available_balance+self.account.unrealized_pnl
         )
         
         # 12. 다음 상태 생성
@@ -461,6 +482,10 @@ class FuturesEnvironment:
             done = True
 
         return next_state, reward, done
+
+    def is_entry(self):
+        """청산 후 첫 진입인지 확인"""
+        return (self.account.prev_position == 0) & (self.account.current_position != 0)
     
     def get_performance_summary(self) -> Dict[str, Any]:
         """성과 요약 반환"""
@@ -569,6 +594,8 @@ class FuturesEnvironment:
             market_regime=0
             # volatility_regime=0
         )
+
+        self.since_entry = 0
         
         return initial_state
     
