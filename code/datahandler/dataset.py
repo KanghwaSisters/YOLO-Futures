@@ -17,8 +17,8 @@ class FuturesDataset(Dataset):
         # df 
         grouped_df = self._make_group(df)
         total_df = self._add_technical_indicators(grouped_df)
-        cleaned_df = self._remove_Nan(total_df)
-        self.states, self.close_prices, self.timesteps = self._split_dataset(cleaned_df, window_size)
+        self.cleaned_df = self._remove_Nan(total_df)
+        self.states, self.close_prices, self.timesteps = self._split_dataset(self.cleaned_df, window_size)
 
         # transform 
         if self.transform_obj:

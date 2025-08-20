@@ -2,11 +2,16 @@ import ta
 import numpy as np
 
 
-def add_basic_indicators(df):
-    df['log_return'] = np.log(df['close'] / df['close'].shift(1))
+def add_basic_indicators(df, L=1500):
+    df['log_return'] = np.log(df['close']).diff().fillna(0.0)
     df['return_5'] = df['close'].pct_change(periods=5)
     df['return_10'] = df['close'].pct_change(periods=10)
     df['volume_change'] = df['vol'].pct_change()
+
+    rolled_df = df['log_return'].shift(1).rolling(L, min_periods=L)
+    df['roll_mu'] = rolled_df.mean().fillna(0.0)
+    df['roll_vol'] = rolled_df.std().fillna(0.0)
+    df['score'] = (df['log_return'] - df['roll_mu'] )/ (df['roll_vol'] + 1e-8)
     return df
 
 def add_trend_indicators(df):
