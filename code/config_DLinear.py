@@ -99,7 +99,7 @@ target_values = ['close', 'high', 'low', 'volume_change',
                 'atr', 'bb_width',
                 'obv']
 
-pred_len_list = [2,4,6,8,10,12,14,16,18,20,30]
+pred_len_list = [5,10,15,20,25,30,40,50,60]
 
 # target_values = ['close', 'high', 'low',
 #                 'ema_5', 'ema_20', 
@@ -115,7 +115,7 @@ CONFIG = EasyDict({
     'ENV': GoalOrTimeoutEnv, 
     'AGENT': PPOAgent,
     'NETWORK': RegimeAwareMultiStatePV,
-    'REWARD_FTN': GOT_log_reward_postpenalty, 
+    'REWARD_FTN': hybrid_reward, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
     'PATH': 'logs/GOT/log_reward',  # '../logs/RobustDivertedNonepi'
