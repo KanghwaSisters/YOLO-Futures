@@ -451,24 +451,56 @@ def reward_per_equity(**kwargs):
 
 DSR = DifferentialSharpeRatio()
 
-def hybrid_reward(w_profit=5,
-                  w_risk=5,
-                  scaling_factor=50_000,
+def hybrid_reward(w_profit=.5,
+                  w_risk=.5,
+                  w_regret=.2, # 이건 4에서는 안 쓰고 5
+                  scaling_factor=1, # 50_000,
+                  margin_call_penalty=-2.0, # -1
+                  maturity_date_penalty=-0.5,
+                  bankrupt_penalty=-5.0,
+                  goal_reward_bonus=2.0,
+                  env_info='',
                   **kwargs):
     def log(value):
         # LOG without problems 
-        return np.sign(value) * np.log1p(abs(value))
+        return np.sign(value) * np.log1p(abs(value) + 1e-6)        # 로그 값이 튀는 걸 방지 
 
+    current_pnl = kwargs['realized_pnl']
+    previous_pnl = kwargs['realized_pnl'] - kwargs['net_realized_pnl']
+
+    net_pnl = log(current_pnl) - log(previous_pnl)
+    unrealized_pnl = log(kwargs['unrealized_pnl']) - log(kwargs['prev_unrealized_pnl'])
     # 종가를 기준으로, 포트폴리오 수익률 지표 
     # 현재 포트폴리오 가치 = 보유 현금 + 미실현 손익 
     portfolio_value = log(kwargs['current_balance']) - log(kwargs['previous_balance'])
 
     # 종합 수익 지표 
-    R_profit = log(kwargs['net_realized_pnl'] / scaling_factor)  # 순실현손익 (cost 포함)
-    R_risk = DSR(portfolio_value)                             # DifferentialSharpeRatio (DSR)
+    # R_profit = net_pnl + unrealized_pnl # 3부터 미실현 손익 추가 2까지는 net_pnl만 썼고 그 전에는 log(kwargs['net_realized_pnl'])
+    R_profit = log(kwargs['net_realized_pnl']) + log(kwargs['unrealized_pnl'] - kwargs['prev_unrealized_pnl'])
+    R_risk = DSR(portfolio_value)                                # DifferentialSharpeRatio (DSR)
+    
+    # 포지션을 들어가지 않을 때의 후회 
+    prev_position = np.sign(kwargs['prev_position'])
+    current_position = np.sign(kwargs['current_position'])
 
-    return w_profit*R_profit + w_risk*R_risk
+    if (prev_position == 0) & (current_position == 0):
+        regret = log(abs(kwargs['diff']))
+    else:
+        regret = 0
 
+    # regret은 4부터 추가함 
+    reward = w_profit*R_profit + w_risk*R_risk - w_regret*regret
 
+    if not np.isfinite(reward):
+        reward = 0.0
 
+    if env_info == 'margin_call':
+        reward += margin_call_penalty
+    elif env_info == 'bankrupt':
+        reward += bankrupt_penalty
+    elif env_info == 'maturity_data' and kwargs.get('execution_strength', 0) != 0:
+        reward += maturity_date_penalty
+    elif env_info == 'goal_profit':
+        reward += goal_reward_bonus
 
+    return np.clip(reward, -1e2, 1e2) 
