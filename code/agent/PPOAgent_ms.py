@@ -112,12 +112,11 @@ class PPOAgent:
             action = self.action_space[_action.item()]
             return action, None, None
 
-
-    def clip_loss_ftn(self, advantage, old_prob, current_prob):
+    def clip_loss_ftn(self, advantage, old_log_prob, current_log_prob):
         '''
         clip_loss_ftn(advantage: torch.Tensor,
-                      old_prob: torch.Tensor,
-                      current_prob: torch.Tensor) -> torch.Tensor
+                      old_log_prob: torch.Tensor,
+                      current_log_prob: torch.Tensor) -> torch.Tensor
 
         ----------
         PPO의 clipped surrogate loss를 계산한다.
@@ -126,10 +125,10 @@ class PPOAgent:
           clip 범위 안에서 surrogate loss를 구한다.
         - 안정적인 policy 업데이트를 위함이다.
         '''
-        ratio = current_prob / (old_prob + 1e-8)
-        clipped_ratio = torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps)
+        ratio = torch.exp(current_log_prob - old_log_prob)
+        ratio = torch.clamp(ratio, 1e-6, 1e2)           # 안정화 
         surrogate1 = ratio * advantage
-        surrogate2 = clipped_ratio * advantage
+        surrogate2 = torch.clamp(ratio, 1 - self.clip_eps, 1 + self.clip_eps) * advantage
         return torch.min(surrogate1, surrogate2).mean()
 
     def cal_advantage(self, memory, lam=0.95):
@@ -177,7 +176,13 @@ class PPOAgent:
             gae = delta + self.gamma * lam * (1 - dones[t]) * gae
             advantage.insert(0, gae)
 
-        return torch.tensor(advantage, dtype=torch.float32).unsqueeze(1)
+        adv = torch.tensor(advantage, dtype=torch.float32).unsqueeze(1)
+        # if adv.std() < 1e-8:
+        #     adv = adv - adv.mean()
+        # else:
+        #     adv = (adv - adv.mean()) / (adv.std() + 1e-8)
+
+        return adv
     
     def _get_max_power2_batch_size(self, len_data, min_n=4, max_n=9):
         """
@@ -262,7 +267,6 @@ class PPOAgent:
             # entropy bonus 
             action_dist = Categorical(logits=current_logits)                        
             current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
-            current_probs = current_log_probs.exp()
 
             # KL Divergence 
             # [1] 현재 롱 숏 방향 분포 
@@ -290,8 +294,8 @@ class PPOAgent:
             w = torch.sigmoid(-self.regulation * torch.abs(s)).detach()
 
             # [5] KL( 현재 정책 | 타깃 혼합 분포 )
-            policy_safe = current_entry_policy.clamp_min(1e-8)
-            p_mix_safe = p_mix.clamp_min(1e-8)
+            policy_safe = current_entry_policy.clamp_min(1e-6)
+            p_mix_safe = p_mix.clamp_min(1e-6)
             kl = (policy_safe * (policy_safe.log() - p_mix_safe.log())).sum(dim=1)
             entry_reg = (w * kl).mean() 
 
@@ -301,7 +305,7 @@ class PPOAgent:
                 value_target = rewards + self.gamma * next_values.squeeze() * (1 - dones)
 
             value_loss = self.critic_loss_ftn(values.squeeze(), value_target.detach())
-            clip_loss = self.clip_loss_ftn(advantages.detach(), old_log_probs.exp().detach(), current_probs)
+            clip_loss = self.clip_loss_ftn(advantages.detach(), old_log_probs.detach(), current_log_probs)
             entropy = action_dist.entropy().mean()
 
             total_loss = -clip_loss + self.value_coeff * value_loss - self.entropy_coeff * entropy + self.lambda_entry * entry_reg
@@ -350,7 +354,6 @@ class DecoupledPPOAgent(PPOAgent):
 
             action_dist = Categorical(logits=current_logits)
             current_log_probs = action_dist.log_prob(actions.squeeze()).unsqueeze(1)
-            current_probs = current_log_probs.exp()
 
             with torch.no_grad():
                 _, next_values = self.model(next_states)
@@ -371,7 +374,7 @@ class DecoupledPPOAgent(PPOAgent):
 
                 total_probs = torch.cat([short_probs, long_probs], dim=1)
 
-                sum_probs = total_probs.sum(dim=1, keepdim=True).clamp_min(1e-8)
+                sum_probs = total_probs.sum(dim=1, keepdim=True).clamp_min(1e-6)
                 current_entry_policy = total_probs / sum_probs
 
                 # [2] 상태별 트렌드 점수 s_t
@@ -396,7 +399,7 @@ class DecoupledPPOAgent(PPOAgent):
             critic_loss = self.value_coeff * self.critic_loss_ftn(values.squeeze(), value_target.detach())
 
             # Actor loss (clipped PPO surrogate)
-            clip_loss = self.clip_loss_ftn(advantages.detach(), old_log_probs.exp().detach(), current_probs)
+            clip_loss = self.clip_loss_ftn(advantages.detach(), old_log_probs.detach(), current_log_probs)
             entropy = action_dist.entropy().mean()
             actor_loss = -clip_loss - self.entropy_coeff * entropy + self.lambda_entry * entry_reg
 
@@ -412,5 +415,6 @@ class DecoupledPPOAgent(PPOAgent):
             # nn.utils.clip_grad_norm_(self.actor_params, max_grad_norm)
             self.critic_optimizer.step()
             self.actor_optimizer.step()
+
 
         return total_loss_sum / self.epoch

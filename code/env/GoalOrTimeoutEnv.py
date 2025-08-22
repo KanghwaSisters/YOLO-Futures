@@ -188,7 +188,8 @@ class GoalOrTimeoutEnv(FuturesEnvironment):
             max_step=self.max_step,
             current_step=self.maintained_steps,
             previous_balance=previous_balance,
-            current_balance=self.account.available_balance+self.account.unrealized_pnl
+            current_balance=self.account.available_balance+self.account.unrealized_pnl,
+            diff=self.get_diff()
         )
         
         # 12. 다음 상태 생성
@@ -370,6 +371,11 @@ class GOTRandomEnv(GoalOrTimeoutEnv):
         df = self.base_dataset.cleaned_df
         current_idx = df.index.get_loc(self.current_timestep)
         return df['log_return'].iloc[current_idx]
+
+    def get_diff(self):
+        df = self.base_dataset.cleaned_df
+        current_idx = df.index.get_loc(self.current_timestep)
+        return df['diff'].iloc[current_idx]
 
     def reset(self):
         """환경 초기화"""

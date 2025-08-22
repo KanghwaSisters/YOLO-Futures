@@ -70,11 +70,7 @@ class FuturesEnvironment:
         # 
         maturity_list = calculate_maturity(dates)
         self.maturity_list = pd.to_datetime(maturity_list)
-        # for t in self.maturity_list:
-        #     print(type(t), t)
-        # self.maturity_iter = iter(self.maturity_list)
-        # self.latest_maturity_day = next(self.maturity_iter)
-        
+
         # === 계좌 및 거래 비용 설정 ===
         self.account = Account(start_budget, position_cap, self.current_timestep, 
                               transaction_cost, slippage_factor)
@@ -179,6 +175,11 @@ class FuturesEnvironment:
         df = self.dataset.cleaned_df
         current_idx = df.index.get_loc(self.current_timestep)
         return df['log_return'].iloc[current_idx]
+
+    def get_diff(self):
+        df = self.dataset.cleaned_df
+        current_idx = df.index.get_loc(self.current_timestep)
+        return df['diff'].iloc[current_idx]
 
     def _slice_by_date(self, full_df: pd.DataFrame, date_range: tuple) -> pd.DataFrame:
         """날짜 범위로 데이터프레임 슬라이싱"""
@@ -394,11 +395,11 @@ class FuturesEnvironment:
         )
         
         # 5. 리스크 메트릭 업데이트
-        self.risk_metrics.update(
-            pnl=net_realized_pnl,
-            returns=daily_return,
-            current_equity=current_equity
-        )
+        # self.risk_metrics.update(
+        #     pnl=net_realized_pnl,
+        #     returns=daily_return,
+        #     current_equity=current_equity
+        # )
         
         # 실제 거래 발생 시 거래 결과 업데이트
         if action != 0:
@@ -446,7 +447,8 @@ class FuturesEnvironment:
             max_step=self.max_step,
             current_step=self.maintained_steps,
             previous_balance=previous_balance,
-            current_balance=self.account.available_balance+self.account.unrealized_pnl
+            current_balance=self.account.available_balance+self.account.unrealized_pnl,
+            diff=self.get_diff()
         )
         
         # 12. 다음 상태 생성

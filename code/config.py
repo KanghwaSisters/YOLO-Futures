@@ -114,11 +114,11 @@ CONFIG = EasyDict({
     'TRAINER': GOTNonEpisodicTrainer, # GOTRandomTrainer, 
     'ENV': GoalOrTimeoutEnv, # GOTRandomEnv, 
     'AGENT': PPOAgent,
-    'NETWORK': MultiStatePV, # RegimeAwareMultiStatePV, 
+    'NETWORK': RegimeAwareMultiStatePV, # MultiStatePV, 
     'REWARD_FTN': hybrid_reward, # GOT_log_reward_postpenalty, 
     'DONE_FTN': reach_max_step,
     'SCALER': scaler,
-    'PATH': 'logs/GOT_KL_hybrid/55_scaling_MultiStatePV',  # Random_28_scaling # '../logs/RobustDivertedNonepi'
+    'PATH': 'logs/GOT_KL_hybrid/55_scaling_MultiState_8',  # Random_28_scaling # '../logs/RobustDivertedNonepi'
     'DATASET_PATH': 'data/processed/kospi200_ffill_clean_version.pkl', # ../data/processed/kospi200_ffill_clean_version.pkl
 
     # 기본 설정
@@ -134,17 +134,17 @@ CONFIG = EasyDict({
     'SINGLE_EXECUTION_CAP' : position_cap,
     'N_ACTIONS': 1+2*position_cap,
     'ACTION_SPACE': list(range(-position_cap, position_cap+1)),
-    'GAMMA': 0.99,
-    'LR': 0.00025, # 3e-4,
+    'GAMMA': 0.9, # 0.99,
+    'LR': 3e-4, # 0.00025, 
     'VALUE_COEFF': 0.5,
     'ENTROPY_COEFF': 0.05,
-    'CLIP_EPS': 0.2,
-    'BATCH_SIZE': 256,
-    'EPOCH': 32,
+    'CLIP_EPS': 0.25, # 0.2,
+    'BATCH_SIZE': 1260, # 256,
+    'EPOCH': 10,
 
     # 모델 설정
     'INPUT_DIM': len(target_values),
-    'AGENT_INPUT_DIM': 8,
+    'AGENT_INPUT_DIM': 7,
     'EMBED_DIM': 32,
     'KERNEL_SIZE': 4,
     'STRIDE': 1,

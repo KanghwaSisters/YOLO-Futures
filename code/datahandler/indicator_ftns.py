@@ -7,6 +7,7 @@ def add_basic_indicators(df, L=1500):
     df['return_5'] = df['close'].pct_change(periods=5)
     df['return_10'] = df['close'].pct_change(periods=10)
     df['volume_change'] = df['vol'].pct_change()
+    df['diff'] = df['close'].diff().fillna(0.0)
 
     rolled_df = df['log_return'].shift(1).rolling(L, min_periods=L)
     df['roll_mu'] = rolled_df.mean().fillna(0.0)
