@@ -102,6 +102,101 @@ class BackTester:
         self.n_steps = n_steps
         self.path = path
 
+    @staticmethod
+    def _sharpe_from_equity(
+        equity_curve,
+        risk_free_annual: float = 0.0,
+        steps_per_year: Optional[float] = None,
+        index_like: Optional["pd.DatetimeIndex"] = None,
+        mode: str = "daily",  # "daily" | "bar"
+    ):
+        """
+        mode="daily": equity를 날짜별 마지막 값으로 리샘플 → 일간 수익률 Sharpe(연율화, *sqrt(252))
+        mode="bar":   기존 바 단위 Sharpe (연율화는 steps_per_year로 *sqrt)
+        """
+        import numpy as np
+        import pandas as pd
+
+        eq = np.asarray(equity_curve, dtype=float)
+        if eq.size < 2:
+            return 0.0
+
+        # ===== DAILY MODE =====
+        if mode == "daily" and index_like is not None and len(index_like) >= len(eq):
+            idx = pd.DatetimeIndex(index_like[: len(eq)])
+            ser = pd.Series(eq, index=idx)
+            daily_eq = ser.resample("1D").last().dropna()
+            if daily_eq.size < 2:
+                return 0.0
+
+            prev = np.clip(daily_eq.shift(1), 1e-9, None)
+            rets = (daily_eq - prev) / prev
+            rets = rets.dropna().replace([np.inf, -np.inf], np.nan).dropna()
+            if rets.size < 2:
+                return 0.0
+
+            rf_daily = risk_free_annual / 252.0
+            excess = rets - rf_daily
+            mu = float(excess.mean())
+            sd = float(excess.std(ddof=1))
+            if not np.isfinite(sd) or sd < 1e-10:
+                return 0.0
+
+            sharpe = mu / sd
+            sharpe *= np.sqrt(252.0)  # 연율화
+            return float(np.clip(sharpe, -10.0, 10.0))
+
+        # ===== BAR MODE (기존) =====
+        prev = np.clip(eq[:-1], 1e-9, None)
+        rets = (eq[1:] - prev) / prev
+        rets = rets[np.isfinite(rets)]
+        if rets.size < 2:
+            return 0.0
+
+        rf_per_step = (risk_free_annual / steps_per_year) if (steps_per_year and steps_per_year > 0) else 0.0
+        excess = rets - rf_per_step
+        mu = float(np.mean(excess))
+        sd = float(np.std(excess, ddof=1))
+        if not np.isfinite(sd) or sd < 1e-10:
+            return 0.0
+
+        sharpe = mu / sd
+        if steps_per_year and steps_per_year > 0:
+            sharpe *= np.sqrt(steps_per_year)
+        return float(np.clip(sharpe, -10.0, 10.0))
+
+    @staticmethod
+    def _max_drawdown_from_equity(equity_curve):
+        """
+        Max Drawdown = min( (E_t - cummax(E_t)) / cummax(E_t) )
+        음수 비율(-0.x) 반환
+        """
+        import numpy as np
+        eq = np.asarray(equity_curve, dtype=float)
+        if eq.size < 2:
+            return 0.0
+        eq = np.where(eq <= 0, np.min(eq[eq > 0]) if np.any(eq > 0) else 1.0, eq)
+        cummax = np.maximum.accumulate(eq)
+        dd = (eq - cummax) / cummax
+        return float(np.clip(dd.min(), -1.0, 0.0))
+
+    @staticmethod
+    def _estimate_steps_per_year(dt_index: pd.DatetimeIndex, trading_days_per_year: int = 252) -> float:
+        """
+        인덱스에서 '하루 평균 바 수'를 추정해 steps/year를 근사.
+        - 날짜별 카운트를 내서 평균 bars/day 계산
+        - steps_per_year = bars_per_day * trading_days_per_year
+        """
+        if not isinstance(dt_index, pd.DatetimeIndex):
+            dt_index = pd.DatetimeIndex(dt_index)
+
+        days = dt_index.normalize()
+        counts = pd.Series(1, index=days).groupby(level=0).sum()
+        if len(counts) == 0:
+            return float(trading_days_per_year)
+        bars_per_day = counts.mean()
+        return float(bars_per_day * trading_days_per_year)
+
     # ----- helper -----
     @staticmethod
     def split_position_strength(action: int) -> Tuple[int, int]:
@@ -137,56 +232,83 @@ class BackTester:
         agent.load_model(state_dict)
         n_win_long, n_win_short, n_win_total = [], [], []
         net_pnl = 0.0
-        equity_curve = []
+        sr, mdd = 0.0, 0.0
+        n = 0
 
         state = env.reset()
-        equity_curve.append(self.get_equity(env.account))
+
+        idx = getattr(getattr(env, "dataset", None), "cleaned_df", None)
+        if idx is None:
+            idx = getattr(getattr(env, "base_dataset", None), "cleaned_df", None)
+        ep_index = idx.index if idx is not None else pd.DatetimeIndex([])
+        steps_per_year = self._estimate_steps_per_year(ep_index)
 
         # 텐서화 (tuple 상태 지원)
         if isinstance(state, tuple):
             ts_state = torch.tensor(state[0], dtype=torch.float32).unsqueeze(0).to(self.device)
             agent_state = torch.tensor(state[1], dtype=torch.float32).unsqueeze(0).to(self.device)
-
-            # print(f"state shape : {ts_state.shape}, {agent_state.shape}")
             state = (ts_state, agent_state)
 
         while not env.dataset.reach_end(env.current_timestep):
             done = False
             current_position = 0
 
+            # 에피소드 단위 equity/시간 기록 시작
+            episode_equity = [self.get_equity(env.account)]
+            episode_times  = [env.current_timestep]
+
             while not done:
                 previous_position = current_position
 
                 mask = getattr(env, "mask", None)
-                action, _, _ = agent.get_action(state, mask)
+                action, _, _ = agent.get_action(state, mask)  # stochastic=True는 선택사항
                 next_state, _, done = env.step(action)
                 current_position, _ = self.split_position_strength(int(action))
 
                 if isinstance(next_state, tuple):
                     ts_state = torch.tensor(next_state[0], dtype=torch.float32).unsqueeze(0).to(self.device)
                     agent_state = torch.tensor(next_state[1], dtype=torch.float32).unsqueeze(0).to(self.device)
-                    # print(f"next state shape : {ts_state.shape}, {agent_state.shape}")
                     next_state = (ts_state, agent_state)
 
                 state = next_state
 
-                # 거래에 따른 실현손익 반영 시 승/패 집계
+                # 실현손익 발생 시 승/패 집계: '이전 포지션' 기준으로 기록 (정확)
                 if getattr(env.account, "net_realized_pnl", 0) != 0:
                     win = int(env.account.net_realized_pnl > 0)
-                    if current_position == 1:   n_win_short.append(win) 
-                    elif current_position == -1: n_win_long.append(win)
+                    if previous_position == 1:    n_win_long.append(win)
+                    elif previous_position == -1: n_win_short.append(win)
                     n_win_total.append(win)
 
-                equity_curve.append(self.get_equity(env.account))
+                # equity/시간 기록
+                episode_equity.append(self.get_equity(env.account))
+                episode_times.append(env.current_timestep)
 
             net_pnl += int(getattr(env.account, "realized_pnl", 0.0))
 
-            # 핵심 요소 초기화 
+            # Sharpe/MDD 계산: 일간 리샘플 기반 Sharpe
+            ep_sr  = self._sharpe_from_equity(
+                episode_equity,
+                risk_free_annual=0.0,
+                steps_per_year=steps_per_year,
+                index_like=pd.DatetimeIndex(episode_times),
+                mode="daily",
+            )
+            # MDD는 환경이 주는 값 대신 로컬 equity로 계산해도 됨 (가독성↑)
+            ep_mdd = self._max_drawdown_from_equity(episode_equity)
+
+            # 길이 가중 평균(에피소드 길이 = 포인트-1)
+            m = max(len(episode_equity) - 1, 0)
+            if m > 0:
+                sr  += (m / (n + m)) * (ep_sr  - sr)
+                mdd += (m / (n + m)) * (ep_mdd - mdd)
+                n   += m
+
+            # 다음 에피소드 대비 초기화 
             env.account.reset()
             env.performance_tracker.reset()
             env.risk_metrics.reset()
 
-        return int(net_pnl), cal_wr(n_win_long), cal_wr(n_win_short), cal_wr(n_win_total)
+        return int(net_pnl), cal_wr(n_win_long), cal_wr(n_win_short), cal_wr(n_win_total), sr, mdd
 
     # ----- weights loop & save -----
     def _list_weight_files(self, models_dir: str) -> List[str]:
@@ -212,6 +334,8 @@ class BackTester:
         df_wr_long  = pd.DataFrame(index=wr_index)
         df_wr_short = pd.DataFrame(index=wr_index)
         df_wr_total = pd.DataFrame(index=wr_index)
+        df_md       = pd.DataFrame(index=wr_index)
+        df_sr       = pd.DataFrame(index=wr_index)
 
         device = getattr(self, "device", "cpu")
 
@@ -220,27 +344,33 @@ class BackTester:
             col = os.path.basename(wpath)
             state_dict = torch.load(wpath, map_location=device)
 
-            pnl_vals, wrL_vals, wrS_vals, wrT_vals = [], [], [], []
+            pnl_vals, wrL_vals, wrS_vals, wrT_vals, sharpe_ratios, max_drawdowns = [], [], [], [], [], []
 
             for idx, env in enumerate(valid_env_list):
-                net_pnl, wr_long, wr_short, wr_total = self.valid(env=env, agent=self.agent, model_name=col, state_dict=state_dict)
-                print(f"[{idx:2}] PnL : {net_pnl:12,.0f} ₩ | total win rate : {wr_total*100:6.2f}% | long win rate : {wr_long*100:6.2f}% | short win rate : {wr_short*100:6.2f}% ")
+                net_pnl, wr_long, wr_short, wr_total, sharpe_ratio, max_drawdown = self.valid(env=env, agent=self.agent, model_name=col, state_dict=state_dict)
+                print(f"[{idx:2}] PnL : {net_pnl:12,.0f} ₩ | total win rate : {wr_total*100:3.0f}% | long win rate : {wr_long*100:3.0f}% | short win rate : {wr_short*100:3.0f}% | mdd :{max_drawdown*100:4.0f}% | sharpe ratio :{sharpe_ratio:3.2f}")
 
-                pnl_vals.append(float(net_pnl))
+                pnl_vals.append(int(net_pnl))
                 wrL_vals.append(float(wr_long))
                 wrS_vals.append(float(wr_short))
                 wrT_vals.append(float(wr_total))
+                sharpe_ratios.append(float(sharpe_ratio))
+                max_drawdowns.append(float(max_drawdown))
 
             df_pnl.loc[env_labels, col]      = pnl_vals
             df_wr_long.loc[env_labels, col]  = wrL_vals
             df_wr_short.loc[env_labels, col] = wrS_vals
             df_wr_total.loc[env_labels, col] = wrT_vals
+            df_md.loc[env_labels, col]       = max_drawdowns
+            df_sr.loc[env_labels, col]       = sharpe_ratios
 
             df_pnl.loc["mean",  col] = np.nanmean(pnl_vals)
             df_pnl.loc["total", col] = np.nansum(pnl_vals)
             df_wr_long.loc["mean",  col] = np.nanmean(wrL_vals)
             df_wr_short.loc["mean", col] = np.nanmean(wrS_vals)
             df_wr_total.loc["mean", col] = np.nanmean(wrT_vals)
+            df_md.loc["mean", col]       = np.nanmean(max_drawdowns)
+            df_sr.loc["mean", col]       = np.nanmean(sharpe_ratios)
 
             print(f"Cumulated PnL : {sum(pnl_vals):12,.0f} ₩")
 
@@ -248,13 +378,17 @@ class BackTester:
         out_wr_long  = os.path.join(root_dir, "win_rate_long.csv")
         out_wr_short = os.path.join(root_dir, "win_rate_short.csv")
         out_wr_total = os.path.join(root_dir, "win_rate_total.csv")
+        out_md       = os.path.join(root_dir, "max_drawdown.csv")
+        out_sr       = os.path.join(root_dir, "sharpe_ratio.csv")
 
         df_pnl.to_csv(out_pnl, encoding="utf-8-sig")
         df_wr_long.to_csv(out_wr_long, encoding="utf-8-sig")
         df_wr_short.to_csv(out_wr_short, encoding="utf-8-sig")
         df_wr_total.to_csv(out_wr_total, encoding="utf-8-sig")
+        df_md.to_csv(out_md, encoding="utf-8-sig")
+        df_sr.to_csv(out_sr, encoding="utf-8-sig")
 
-        print(f"[Saved]\n  {out_pnl}\n  {out_wr_long}\n  {out_wr_short}\n  {out_wr_total}")
+        print(f"[Saved]\n  {out_pnl}\n  {out_wr_long}\n  {out_wr_short}\n  {out_wr_total}\n {out_sr}\n {out_md}")
 
     # ----- visuals -----
     def generate_valid_visuals(self, root_dir: str, init_capital=30_000_000):
@@ -299,7 +433,7 @@ class BackTester:
                     if np.isfinite(val):
                         ax.text(j, i, value_fmt % val, ha="center", va="center", fontsize=8)
 
-            cbar = fig.colorbar(im, ax=ax); cbar.ax.set_ylabel("value", rotation=270, labelpad=14)
+            cbar = fig.colorbar(im, ax=ax, cmap="bwr"); cbar.ax.set_ylabel("value", rotation=270, labelpad=14)
             plt.tight_layout(); fig.savefig(out_path, dpi=200, bbox_inches="tight"); plt.close(fig)
             print(f"[Saved] {out_path}")
 
