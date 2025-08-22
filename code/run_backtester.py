@@ -12,7 +12,7 @@ target_directory = base_directory + '/logs/' + file_name
 # model_path = target_directory + '/models/I13bestreward.pth'
 model_path = None 
 
-# main_backTester(target_directory)                      # 전체 모델에 대한 검증 시작
+main_backTester(target_directory)                      # 전체 모델에 대한 검증 시작
 
 # 하나의 가중치에 대해 여러번 valid를 돌림 : 정책이 greedy하지 않기 때문  
 main_single_backTester(target_directory, 
