@@ -10,7 +10,26 @@ You Only Lose Once… 🤡
 ## About US
 
 
-| ![이름1](./asset/imgs/logo.jpg) | ![이름2](./asset/imgs/JiminLee.jpg) | ![이름3](./asset/imgs/SooMiiii.jpeg) | ![이름4](./asset/imgs/SeungyeonLee.jpeg) |
-|:----:|:----:|:----:|:----:|
-| YOLO-Futures | [Jimin Lee](https://github.com/Tonnonssi) | [Sumi Lee](https://github.com/SooMiiii) | [Seungyeon Lee](https://github.com/sabina381) |
-| 강화시스터즈 3기 03 세션  | Team Leader | Team Member | Team Member |
+<table>
+  <tr>
+    <td align="center">
+      <img src="./asset/imgs/logo.jpg" width="150" height="150"/><br>
+      <b>YOLO-Futures</b><br>
+    </td>
+    <td align="center">
+      <img src="./asset/imgs/JiminLee.jpg" width="150" height="150"/><br>
+      <b>Jimin Lee</b><br>
+      Team Leader
+    </td>
+    <td align="center">
+      <img src="./asset/imgs/SooMiiii.jpeg" width="150" height="150"/><br>
+      <b>Sumi Lee</b><br>
+      Team Member
+    </td>
+    <td align="center">
+      <img src="./asset/imgs/SeungyeonLee.jpeg" width="150" height="150"/><br>
+      <b>Seungyeon Lee</b><br>
+      Team Member
+    </td>
+  </tr>
+</table>
