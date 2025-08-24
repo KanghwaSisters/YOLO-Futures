@@ -44,6 +44,7 @@ def main(CONFIG):
         agent_out_dim=CONFIG.AGENT_OUT_DIM,
         fusion_hidden_dim=CONFIG.FUSION_HIDDEN_DIM,
         num_heads=CONFIG.NUM_HEADS,
+        decompose_trainable=CONFIG.DECOMPOSE_TRAINABLE,
         metadata=CONFIG.METADATA,
         d_ff=CONFIG.D_FF,
         dropout=CONFIG.DROPOUT

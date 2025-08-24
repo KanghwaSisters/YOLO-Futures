@@ -35,6 +35,7 @@ class BasicFusion(nn.Module):
                  agent_out_dim=32,
                  fusion_hidden_dim=64,
                  num_heads=4,
+                 decompose_trainable=False,
                  metadata=True,
                  d_ff=64,
                  dropout=0.1):
@@ -45,7 +46,7 @@ class BasicFusion(nn.Module):
                                             pred_len_list=pred_len_list,
                                             channel_size=input_dim,
                                             device=device,
-                                            decompose_trainable=False,
+                                            decompose_trainable=decompose_trainable,
                                             metadata=metadata)
         
         self.agent_block = AgentModel(agent_input_dim, agent_hidden_dim, agent_out_dim, dropout)
@@ -85,6 +86,7 @@ class RegimeFusion(nn.Module):
                  agent_out_dim=32,
                  fusion_hidden_dim=64,
                  num_heads=4,
+                 decompose_trainable=False,
                  metadata=True,
                  d_ff=64,
                  dropout=0.1):
@@ -96,7 +98,7 @@ class RegimeFusion(nn.Module):
                                             pred_len_list=pred_len_list,
                                             channel_size=input_dim,
                                             device=device,
-                                            decompose_trainable=False,
+                                            decompose_trainable=decompose_trainable,
                                             metadata=metadata)
         
         self.agent_block = AgentModel(agent_input_dim, agent_hidden_dim, agent_out_dim, dropout)
@@ -173,6 +175,7 @@ class MultiStatePV(nn.Module):
                  agent_out_dim=32,
                  fusion_hidden_dim=64,
                  num_heads=4,            # Multi-head attention 헤드 수
+                 decompose_trainable=False,
                  metadata=True,
                  d_ff=64,                # FFN hidden size
                  dropout=0.1):             # dropout 비율        
@@ -182,7 +185,7 @@ class MultiStatePV(nn.Module):
                                     kernel_size, seq_len, pred_len_list,
                                     action_size, device, 
                                     agent_hidden_dim, agent_out_dim, fusion_hidden_dim,
-                                    num_heads, metadata, d_ff, dropout)
+                                    num_heads, decompose_trainable, metadata, d_ff, dropout)
 
         self.actor = Actor(fusion_hidden_dim, action_size)
         self.critic = Critic(fusion_hidden_dim)
@@ -211,6 +214,7 @@ class RegimeAwareMultiStatePV(nn.Module):
                  agent_out_dim=32,
                  fusion_hidden_dim=64,
                  num_heads=4,
+                 decompose_trainable=False,
                  metadata=True,
                  d_ff=64,
                  dropout=0.1):
@@ -221,7 +225,7 @@ class RegimeAwareMultiStatePV(nn.Module):
                                     kernel_size, seq_len, pred_len_list,
                                     action_size, device,
                                     agent_hidden_dim, agent_out_dim, fusion_hidden_dim,
-                                    num_heads, metadata, d_ff, dropout)
+                                    num_heads, decompose_trainable, metadata, d_ff, dropout)
 
         self.actor = Actor(fusion_hidden_dim, action_size)
         self.critic = Critic(fusion_hidden_dim)

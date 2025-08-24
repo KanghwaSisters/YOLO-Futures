@@ -113,7 +113,7 @@ CONFIG = EasyDict({
     # main component. 
     'TRAINER': GOTNonEpisodicTrainer, 
     'ENV': GoalOrTimeoutEnv, 
-    'AGENT': PPOAgent,
+    'AGENT': DecoupledPPOAgent,
     'NETWORK': RegimeAwareMultiStatePV,
     'REWARD_FTN': hybrid_reward, 
     'DONE_FTN': reach_max_step,
@@ -139,7 +139,7 @@ CONFIG = EasyDict({
     'VALUE_COEFF': 0.5,
     'ENTROPY_COEFF': 0.05,
     'CLIP_EPS': 0.2,
-    'BATCH_SIZE': 256,
+    'BATCH_SIZE': 128,
     'EPOCH': 32,
 
     # 모델 설정
@@ -151,6 +151,7 @@ CONFIG = EasyDict({
     'AGENT_OUT_DIM': 32,
     'FUSION_HIDDEN_DIM': 64,
     'NUM_HEADS': len(pred_len_list),
+    'DECOMPOSE_TRAINABLE':True,
     'METADATA': False,
     'D_FF': 64,
     'DROPOUT': 0.1,
