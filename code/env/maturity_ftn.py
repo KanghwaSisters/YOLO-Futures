@@ -46,7 +46,7 @@ def calculate_maturity(dates):
                     # 1주차를 확인해야하는 경우의 예외 처리
                     if len(check_week) <= 1:
                         # 조건: 2주차에 장이 열리지 않음 / 금요일만 장이 열림
-                        if (len(check_week) == 0) or (check_week[0].isocalender().week == 4):
+                        if (len(check_week) == 0) or (check_week[0].isocalendar().week == 4):
                             check_week = dates[(dates.year == year) & (dates.isocalendar().week == yearweek)]   # 월의 1주차
 
                 for d in reversed(check_week): # 해당 주차의 날짜를 거꾸로 확인

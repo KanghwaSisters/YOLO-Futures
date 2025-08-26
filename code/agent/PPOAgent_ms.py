@@ -255,7 +255,8 @@ class PPOAgent:
         for _ in range(self.epoch):
             # set memory
             states, actions, rewards, next_states, dones, old_log_probs, advantages, masks, entry_masks, entry_scores, log_policies = self.sample_memory(memory, advantage)
-
+            print(f'ts_state : {states[0].shape}')
+            print(f'agent_state : {states[1].shape}')
             # get current values 
             self.model.train()
             current_logits, values = self.model(states)
@@ -315,6 +316,7 @@ class PPOAgent:
             # back-propagation 
             self.optimizer.zero_grad()
             total_loss.backward()
+            nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
             self.optimizer.step()
 
         return losses / self.epoch
