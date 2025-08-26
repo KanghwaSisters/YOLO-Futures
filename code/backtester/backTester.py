@@ -10,6 +10,7 @@ import torch
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from easydict import EasyDict
+from collections import Counter
 
 # ===== 프로젝트 모듈 =====
 from datahandler.scaler import *
@@ -513,6 +514,241 @@ class BackTester:
         return cfg
 
 
+class VotingBackTester(BackTester):
+    def __init__(self, df, env, train_valid_timestep, window_size, state, reward_ftn, done_ftn, start_budget, scaler, position_cap,
+                 agent, model, optimizer, device, n_steps, path, n_vote=30):
+
+        super().__init__(df, env, train_valid_timestep, window_size, state, reward_ftn, done_ftn, start_budget, scaler, position_cap,
+                    agent, model, optimizer, device, n_steps, path)
+
+        self.n_vote = n_vote
+
+    # ----- core valid -----
+    def valid(self, env, agent, model_name, state_dict):
+        def cal_wr(lst): return round(sum(lst) / len(lst), 2) if len(lst) else 0.0
+
+        agent.load_model(state_dict)
+        n_win_long, n_win_short, n_win_total = [], [], []
+        net_pnl = 0.0
+        sr, mdd = 0.0, 0.0
+        n = 0
+
+        state = env.reset()
+
+        idx = getattr(getattr(env, "dataset", None), "cleaned_df", None)
+        if idx is None:
+            idx = getattr(getattr(env, "base_dataset", None), "cleaned_df", None)
+        ep_index = idx.index if idx is not None else pd.DatetimeIndex([])
+        steps_per_year = self._estimate_steps_per_year(ep_index)
+
+        # 텐서화 (tuple 상태 지원)
+        if isinstance(state, tuple):
+            ts_state = torch.tensor(state[0], dtype=torch.float32).unsqueeze(0).to(self.device)
+            agent_state = torch.tensor(state[1], dtype=torch.float32).unsqueeze(0).to(self.device)
+            state = (ts_state, agent_state)
+
+        while not env.dataset.reach_end(env.current_timestep):
+            done = False
+            current_position = 0
+
+            # 에피소드 단위 equity/시간 기록 시작
+            episode_equity = [self.get_equity(env.account)]
+            episode_times  = [env.current_timestep]
+
+            while not done:
+                voting_result = []
+
+                mask = getattr(env, "mask", None)
+                # 다수결 과정 
+                for _ in range(self.n_vote):
+                    a, _, _ = agent.get_action(state, mask)
+                    voting_result.append(a)
+                counts = Counter(voting_result)
+                action = counts.most_common(1)[0][0]
+                # 여기까지 
+                next_state, _, done = env.step(action)
+                current_position, _ = self.split_position_strength(int(action))
+
+                if isinstance(next_state, tuple):
+                    ts_state = torch.tensor(next_state[0], dtype=torch.float32).unsqueeze(0).to(self.device)
+                    agent_state = torch.tensor(next_state[1], dtype=torch.float32).unsqueeze(0).to(self.device)
+                    next_state = (ts_state, agent_state)
+
+                state = next_state
+
+                # 실현손익 발생 시 승/패 집계: '이전 포지션' 기준으로 기록 (정확)
+                if getattr(env.account, "net_realized_pnl", 0) != 0:
+                    win = int(env.account.net_realized_pnl > 0)
+                    if previous_position == 1:    n_win_long.append(win)
+                    elif previous_position == -1: n_win_short.append(win)
+                    n_win_total.append(win)
+
+                # equity/시간 기록
+                episode_equity.append(self.get_equity(env.account))
+                episode_times.append(env.current_timestep)
+
+            net_pnl += int(getattr(env.account, "realized_pnl", 0.0))
+
+            # Sharpe/MDD 계산: 일간 리샘플 기반 Sharpe
+            ep_sr  = self._sharpe_from_equity(
+                episode_equity,
+                risk_free_annual=0.0,
+                steps_per_year=steps_per_year,
+                index_like=pd.DatetimeIndex(episode_times),
+                mode="daily",
+            )
+            # MDD는 환경이 주는 값 대신 로컬 equity로 계산해도 됨 (가독성↑)
+            ep_mdd = self._max_drawdown_from_equity(episode_equity)
+
+            # 길이 가중 평균(에피소드 길이 = 포인트-1)
+            m = max(len(episode_equity) - 1, 0)
+            if m > 0:
+                sr  += (m / (n + m)) * (ep_sr  - sr)
+                mdd += (m / (n + m)) * (ep_mdd - mdd)
+                n   += m
+
+            # 다음 에피소드 대비 초기화 
+            env.account.reset()
+            env.performance_tracker.reset()
+            env.risk_metrics.reset()
+
+        return int(net_pnl), cal_wr(n_win_long), cal_wr(n_win_short), cal_wr(n_win_total), sr, mdd
+
+    def run_all_models_and_save_csvs(self, root_dir: str):
+        models_dir = os.path.join(root_dir, "models")
+        weight_files = self._list_weight_files(models_dir)
+
+        valid_env_list = self.get_valid_env_list(self.valid_timestep)
+        env_labels = list(range(len(self.valid_timestep)))
+
+        pnl_index   = env_labels + ["mean", "total"]
+        wr_index    = env_labels + ["mean"]
+
+        df_pnl      = pd.DataFrame(index=pnl_index)
+        df_wr_long  = pd.DataFrame(index=wr_index)
+        df_wr_short = pd.DataFrame(index=wr_index)
+        df_wr_total = pd.DataFrame(index=wr_index)
+        df_md       = pd.DataFrame(index=wr_index)
+        df_sr       = pd.DataFrame(index=wr_index)
+
+        device = getattr(self, "device", "cpu")
+
+        for wpath in weight_files:
+            print(f"Start Validation {wpath}")
+            col = os.path.basename(wpath)
+            state_dict = torch.load(wpath, map_location=device)
+
+            pnl_vals, wrL_vals, wrS_vals, wrT_vals, sharpe_ratios, max_drawdowns = [], [], [], [], [], []
+
+            for idx, env in enumerate(valid_env_list):
+                net_pnl, wr_long, wr_short, wr_total, sharpe_ratio, max_drawdown = self.valid(env=env, agent=self.agent, model_name=col, state_dict=state_dict)
+                print(f"[{idx:2}] PnL : {net_pnl:12,.0f} ₩ | total win rate : {wr_total*100:3.0f}% | long win rate : {wr_long*100:3.0f}% | short win rate : {wr_short*100:3.0f}% | mdd :{max_drawdown*100:4.0f}% | sharpe ratio :{sharpe_ratio:3.2f}")
+
+                pnl_vals.append(int(net_pnl))
+                wrL_vals.append(float(wr_long))
+                wrS_vals.append(float(wr_short))
+                wrT_vals.append(float(wr_total))
+                sharpe_ratios.append(float(sharpe_ratio))
+                max_drawdowns.append(float(max_drawdown))
+
+            df_pnl.loc[env_labels, col]      = pnl_vals
+            df_wr_long.loc[env_labels, col]  = wrL_vals
+            df_wr_short.loc[env_labels, col] = wrS_vals
+            df_wr_total.loc[env_labels, col] = wrT_vals
+            df_md.loc[env_labels, col]       = max_drawdowns
+            df_sr.loc[env_labels, col]       = sharpe_ratios
+
+            df_pnl.loc["mean",  col] = np.nanmean(pnl_vals)
+            df_pnl.loc["total", col] = np.nansum(pnl_vals)
+            df_wr_long.loc["mean",  col] = np.nanmean(wrL_vals)
+            df_wr_short.loc["mean", col] = np.nanmean(wrS_vals)
+            df_wr_total.loc["mean", col] = np.nanmean(wrT_vals)
+            df_md.loc["mean", col]       = np.nanmean(max_drawdowns)
+            df_sr.loc["mean", col]       = np.nanmean(sharpe_ratios)
+
+            print(f"Cumulated PnL : {sum(pnl_vals):12,.0f} ₩")
+
+        out_pnl      = os.path.join(root_dir, "voting_net_pnl.csv")
+        out_wr_long  = os.path.join(root_dir, "voting_win_rate_long.csv")
+        out_wr_short = os.path.join(root_dir, "voting_win_rate_short.csv")
+        out_wr_total = os.path.join(root_dir, "voting_win_rate_total.csv")
+        out_md       = os.path.join(root_dir, "voting_max_drawdown.csv")
+        out_sr       = os.path.join(root_dir, "voting_sharpe_ratio.csv")
+
+        df_pnl.to_csv(out_pnl, encoding="utf-8-sig")
+        df_wr_long.to_csv(out_wr_long, encoding="utf-8-sig")
+        df_wr_short.to_csv(out_wr_short, encoding="utf-8-sig")
+        df_wr_total.to_csv(out_wr_total, encoding="utf-8-sig")
+        df_md.to_csv(out_md, encoding="utf-8-sig")
+        df_sr.to_csv(out_sr, encoding="utf-8-sig")
+
+        print(f"[Saved]\n  {out_pnl}\n  {out_wr_long}\n  {out_wr_short}\n  {out_wr_total}\n {out_sr}\n {out_md}")
+
+    # ----- visuals -----
+    def generate_valid_visuals(self, root_dir: str, init_capital=30_000_000):
+        os.makedirs(os.path.join(root_dir, "valid_vis"), exist_ok=True)
+        vis_dir = os.path.join(root_dir, "valid_vis")
+
+        paths = {
+            "pnl": os.path.join(root_dir, "voting_net_pnl.csv"),
+            "wr_long": os.path.join(root_dir, "voting_win_rate_long.csv"),
+            "wr_short": os.path.join(root_dir, "voting_win_rate_short.csv"),
+            "wr_total": os.path.join(root_dir, "voting_win_rate_total.csv"),
+        }
+
+        # 최고의 mean 모델 텍스트로 저장
+        tops = {}
+        for key, p in paths.items():
+            df = pd.read_csv(p, index_col=0)
+            mean_row = df.loc["mean"]
+            best_model = mean_row.astype(float).idxmax()
+            best_value = float(mean_row[best_model])
+            tops[key] = (best_model, best_value)
+
+        txt_path = os.path.join(vis_dir, "voting_top_models.txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("# Top models by highest mean (column name = weight file)\n")
+            f.write(f"PNL (mean): {tops['pnl'][0]} | value={tops['pnl'][1]:.6f}\n")
+            f.write(f"WinRate-Long (mean):  {tops['wr_long'][0]} | value={tops['wr_long'][1]:.6f}\n")
+            f.write(f"WinRate-Short (mean): {tops['wr_short'][0]} | value={tops['wr_short'][1]:.6f}\n")
+            f.write(f"WinRate-Total (mean): {tops['wr_total'][0]} | value={tops['wr_total'][1]:.6f}\n")
+        print(f"[Saved] {txt_path}")
+
+        def save_heatmap(data: pd.DataFrame, title: str, out_path: str, value_fmt="%.2f"):
+            fig, ax = plt.subplots(figsize=(max(8, data.shape[1]*0.6), max(6, data.shape[0]*0.4)))
+            im = ax.imshow(data.values, aspect="auto")
+            ax.set_title(title)
+            ax.set_xticks(np.arange(data.shape[1])); ax.set_xticklabels(data.columns, rotation=45, ha="right")
+            ax.set_yticks(np.arange(data.shape[0])); ax.set_yticklabels(data.index)
+
+            for i in range(data.shape[0]):
+                for j in range(data.shape[1]):
+                    val = data.iat[i, j]
+                    if np.isfinite(val):
+                        ax.text(j, i, value_fmt % val, ha="center", va="center", fontsize=8)
+
+            cbar = fig.colorbar(im, ax=ax, cmap="bwr"); cbar.ax.set_ylabel("value", rotation=270, labelpad=14)
+            plt.tight_layout(); fig.savefig(out_path, dpi=200, bbox_inches="tight"); plt.close(fig)
+            print(f"[Saved] {out_path}")
+
+        # PnL 퍼센트 히트맵
+        pnl_df = pd.read_csv(paths["pnl"], index_col=0)
+        env_rows = [r for r in pnl_df.index if r not in ("mean", "total")]
+        pnl_env = pnl_df.loc[env_rows].astype(float)
+        pnl_pct = pnl_env / float(init_capital) * 100.0
+        save_heatmap(pnl_pct, f"Net PnL (% of {init_capital:,} KRW)", os.path.join(vis_dir, "voting_pnl_percent_heatmap.png"))
+
+        # Winrate 히트맵
+        for key, title, fname in [
+            ("wr_long",  "Win Rate (Long)",  "voting_winrate_long_heatmap.png"),
+            ("wr_short", "Win Rate (Short)", "voting_winrate_short_heatmap.png"),
+            ("wr_total", "Win Rate (Total)", "voting_winrate_total_heatmap.png"),
+        ]:
+            wr_df = pd.read_csv(paths[key], index_col=0)
+            env_rows = [r for r in wr_df.index if r != "mean"]
+            wr_env = wr_df.loc[env_rows].astype(float)
+            save_heatmap(wr_env, title, os.path.join(vis_dir, fname))
+
 # ---------- setting.txt -> CONFIG ----------
 def _build_resolver() -> Dict[str, Any]:
     resolver = {}
@@ -537,7 +773,7 @@ def _load_config_from_setting(setting_path: str, path_dir_override: Optional[str
 
 
 # ---------- 메인 ----------
-def main_backTester(entry: Optional[str]=None):
+def main_backTester(entry: Optional[str]=None, BackTester=BackTester):
     """
     entry가 디렉터리면 그 안의 setting.txt 사용.
     entry가 파일이면 그 파일을 setting.txt로 사용.
@@ -565,6 +801,8 @@ def main_backTester(entry: Optional[str]=None):
     if "TRAIN_VALID_TIMESTEP" not in CONFIG or not CONFIG.TRAIN_VALID_TIMESTEP:
         print("[Info] TRAIN_VALID_TIMESTEP not in setting.txt — creating fallback splits.")
         CONFIG.TRAIN_VALID_TIMESTEP = _even_split_timesteps(df.index, n_group=CONFIG.N_GROUP, train_ratio=0.9)
+
+    CONFIG.DEVICE = get_device()
 
     # 4) state / model / agent 구성
     state = State(CONFIG.TARGET_VALUES)
