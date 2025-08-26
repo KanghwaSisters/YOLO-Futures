@@ -94,6 +94,7 @@ class Account:
         # 계좌 변동
         self.available_balance -= initial_margin + cost
         self.margin_deposit += initial_margin
+        self.realized_pnl -= cost
 
     def _settle_contract(self, size, position, market_pt, get_pnl=True):
         '''
@@ -268,10 +269,15 @@ class Account:
         self.unrealized_pnl = 0                 # 미실현 손익
         self.prev_unrealized_pnl = 0            # 직전 스텝의 미실현 손익
         self.total_transaction_costs = 0        # 총 수수료
-        
+    
+    @property
+    def equity(self) -> float:
+        # 선물 계정의 올바른 Equity 정의
+        return self.available_balance + self.margin_deposit + self.unrealized_pnl
+    
     def __str__(self):
         """계좌 상태 출력"""
-        total_equity = self.available_balance + self.unrealized_pnl
+        total_equity = self.equity
         
         return (
             f"===============================================\n"

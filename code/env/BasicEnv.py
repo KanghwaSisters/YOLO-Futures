@@ -239,7 +239,7 @@ class FuturesEnvironment:
     def _check_insufficient(self):
         # 새로운 계약을 체결할 수 없는 경우의 조건
         # 일 뿐 done=True가 아니다 
-        if (self.account.available_balance <= self.previous_price * self.account.initial_margin_rate):
+        if (self.account.available_balance <= self.previous_price * self.account.initial_margin_rate * self.account.contract_unit):
             self.info = 'insufficient'
 
     def _is_risk_limits(self):
@@ -268,7 +268,7 @@ class FuturesEnvironment:
         self.info = ''  # 초기화
         
         # 자본금 부족 확인
-        if self.account.available_balance <= self.previous_price * self.account.initial_margin_rate:
+        if self.account.available_balance <= self.previous_price * self.account.initial_margin_rate * self.account.contract_unit:
             self.info = 'insufficient'
         
         # 마진콜 확인
@@ -346,7 +346,7 @@ class FuturesEnvironment:
             forced_liquidation_pnl, _cost = self._force_liquidate_all_positions(current_price)
             
             # 강제 청산 후 자산 계산
-            current_equity = self.account.available_balance + self.account.unrealized_pnl
+            current_equity = self.account.equity
             current_equity = max(current_equity, 1.0)
             
             daily_return = self.performance_tracker.update_equity(current_equity)
@@ -370,7 +370,7 @@ class FuturesEnvironment:
             
         else:
             # ====확인요망!!!!!!!!!!!!!!!================
-            current_equity = self.account.available_balance + self.account.unrealized_pnl
+            current_equity = self.account.equity
             current_equity = max(current_equity, 1.0)  # 음수 방지
             
             # 4. 성과 추적 업데이트
@@ -440,7 +440,7 @@ class FuturesEnvironment:
             prev_position=self.account.prev_position,
             current_position=self.account.current_position,
             execution_strength=self.account.execution_strength,
-            equity=self.account.available_balance,
+            equity=self.account.equity,
             initial_budget=self.account.initial_budget,
             since_entry=self.since_entry,
             score=self.get_score(),
@@ -491,7 +491,7 @@ class FuturesEnvironment:
     
     def get_performance_summary(self) -> Dict[str, Any]:
         """성과 요약 반환"""
-        current_equity = self.account.available_balance + self.account.unrealized_pnl
+        current_equity = self.account.equity
         total_return = (current_equity / self.account.initial_budget) - 1
         
         # 리스크 지표 요약
@@ -565,7 +565,7 @@ class FuturesEnvironment:
         self.current_timestep = timestep
         
         # 6. 초기 자산 가치 기록
-        initial_equity = self.account.available_balance + self.account.unrealized_pnl
+        initial_equity = self.account.equity
         initial_equity = max(initial_equity, 1.0)
         
         # 성과 추적기에 초기 자산 설정
@@ -660,7 +660,7 @@ class FuturesEnvironment:
         perf = self.get_performance_summary()
         
         # 계좌 상태
-        total_equity = self.account.available_balance + self.account.unrealized_pnl
+        total_equity = self.account.equity
         detailed_account = (
             f"===============================================\n"
             f"📁 1. Account Status (계좌 상태)\n"
