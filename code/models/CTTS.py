@@ -371,7 +371,7 @@ class Actor(nn.Module):
         self.actor_fc1 = nn.Linear(fusion_hidden_dim, fusion_hidden_dim)
         self.actor_fc2 = nn.Linear(fusion_hidden_dim, action_size)
 
-        # critic params 
+        # critic params : 실수라서 빼고 싶은데 빠면 오류남 
         self.critic_fc1 = nn.Linear(fusion_hidden_dim, fusion_hidden_dim)
         self.critic_fc2 = nn.Linear(fusion_hidden_dim, 1)
 
