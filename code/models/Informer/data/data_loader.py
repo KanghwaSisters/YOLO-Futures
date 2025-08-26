@@ -73,12 +73,12 @@ class Dataset_Kospi200(Dataset):
         df_raw = df_raw[['date'] + cols + [self.target]]
         # df_raw = df_raw[:5000]
         
-        df_raw = add_basic_indicators(df_raw)
-        df_raw = add_trend_indicators(df_raw)
-        df_raw = add_momentum_indicators(df_raw)
-        df_raw = add_volume_indicators(df_raw)
-        df_raw = add_volatility_indicators(df_raw)  
-        df_raw.fillna(method='bfill', inplace=True)
+        # df_raw = add_basic_indicators(df_raw)
+        # df_raw = add_trend_indicators(df_raw)
+        # df_raw = add_momentum_indicators(df_raw)
+        # df_raw = add_volume_indicators(df_raw)
+        # df_raw = add_volatility_indicators(df_raw)  
+        # df_raw.fillna(method='bfill', inplace=True)
 
         # 5. 데이터 분리 인덱스
         num_train = int(len(df_raw) * 0.7)
@@ -186,13 +186,12 @@ class Dataset_Pred(Dataset):
         df_raw = df_raw.sort_values('date').reset_index(drop=True)
         # df_raw = df_raw[:5000]
         
-
-        df_raw = add_basic_indicators(df_raw)
-        df_raw = add_trend_indicators(df_raw)
-        df_raw = add_momentum_indicators(df_raw)
-        df_raw = add_volume_indicators(df_raw)
-        df_raw = add_volatility_indicators(df_raw)  
-        df_raw.fillna(method='bfill', inplace=True)
+        # df_raw = add_basic_indicators(df_raw)
+        # df_raw = add_trend_indicators(df_raw)
+        # df_raw = add_momentum_indicators(df_raw)
+        # df_raw = add_volume_indicators(df_raw)
+        # df_raw = add_volatility_indicators(df_raw)  
+        # df_raw.fillna(method='bfill', inplace=True)
 
         if self.cols:
             cols = self.cols.copy()

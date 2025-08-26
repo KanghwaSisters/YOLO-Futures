@@ -125,7 +125,6 @@ class MultiInformer(nn.Module):
                  freq='d', activation='gelu', device='cuda'):
         super().__init__()
 
-        # 기본 파라미터
         self.label_len = label_len
         self.device = device
         self.enc_in = enc_in
@@ -133,18 +132,16 @@ class MultiInformer(nn.Module):
         self.embed = embed
         self.freq = freq
 
-        # timeF 사용 시, x_mark의 차원은 freq 기반으로 고정
         if self.embed == 'timeF':
             assert freq in self.FREQ2TIME_DIM, f"Unsupported freq '{freq}' for timeF."
             self.time_dim = self.FREQ2TIME_DIM[freq]
         else:
-            # embed != 'timeF' (ex: 'fixed') 인 경우 디폴트로 4
             self.time_dim = 4
 
-        # 실제 시간 특성 생성기 (기존 timefeatures.py 활용)
         self.time_feature_gen = TimeFeatureGenerator(time_dim=self.time_dim, freq=freq)
 
-        # Informer 3개 (enc_in/dec_in은 입력 값(feature) 차원과 동일)
+        # 3개 대신 1개의 공유 Informer
+        # 가장 긴 예측 길이(60)로 설정
         common_kwargs = dict(
             factor=factor, d_model=d_model, n_heads=n_heads,
             e_layers=e_layers, d_layers=d_layers, d_ff=d_ff,
@@ -153,51 +150,34 @@ class MultiInformer(nn.Module):
             distil=True, mix=True, device=device
         )
 
-        self.short_informer = Informer(
-            enc_in=self.enc_in, dec_in=self.dec_in, c_out=c_out,
-            seq_len=seq_len, label_len=label_len, out_len=5, **common_kwargs
-        ).float()
-
-        self.medium_informer = Informer(
-            enc_in=self.enc_in, dec_in=self.dec_in, c_out=c_out,
-            seq_len=seq_len, label_len=label_len, out_len=20, **common_kwargs
-        ).float()
-
-        self.long_informer = Informer(
+        # 하나의 공유 Informer (최대 길이로 설정)
+        self.shared_informer = Informer(
             enc_in=self.enc_in, dec_in=self.dec_in, c_out=c_out,
             seq_len=seq_len, label_len=label_len, out_len=60, **common_kwargs
         ).float()
 
+        # 기존과 동일한 신호 추출기
         self.signal_extractor = ValueSignalExtractor()
 
     def forward(self, x, x_mark=None, dates=None, timestamps=None):
         """
-        Args:
-            x: 입력 시계열 데이터 (batch_size, seq_len, features)
-            x_mark: 시간 마크 (optional, 없으면 생성)
-            dates: 실제 날짜 데이터 (optional, pandas.DatetimeIndex)
-            timestamps: 데이터로더에서 받은 timestamp 데이터 (optional)
+        기존 MultiInformer와 완전히 동일한 인터페이스
         """
         batch_size, seq_len, _ = x.shape
 
-        # x_mark 생성 또는 처리
+        # 기존과 동일한 x_mark 처리 로직
         if x_mark is None:
             if timestamps is not None:
-                # 데이터로더에서 받은 timestamp 사용
                 x_mark = self.time_feature_gen.from_dataloader_timestamps(
                     timestamps, batch_size, seq_len, self.device
                 )
             else:
-                # dates 또는 더미 날짜 사용
                 x_mark = self.time_feature_gen(batch_size, seq_len, self.device, dates)
         else:
-            # x_mark가 잘못된 차원으로 들어오는 경우 → time_dim으로 맞춰서 투영
             if x_mark.shape[-1] != self.time_dim:
                 if x_mark.shape[-1] > self.time_dim:
-                    # 차원이 더 큰 경우 앞에서부터 필요한 만큼만 사용
                     x_mark = x_mark[:, :, :self.time_dim]
                 else:
-                    # 차원이 작은 경우 Linear layer로 투영
                     proj = nn.Linear(x_mark.shape[-1], self.time_dim, bias=False).to(self.device)
                     x_mark = proj(x_mark)
 
@@ -205,22 +185,26 @@ class MultiInformer(nn.Module):
         all_signals = []
 
         try:
-            # Short
-            dec_inp_short = self._prepare_decoder_input(x, pred_len=5)
-            y_mark_short = self._prepare_decoder_mark(x_mark, pred_len=5)
-            short_pred = self.short_informer(x, x_mark, dec_inp_short, y_mark_short)
-            all_signals.append(self.signal_extractor(short_pred, current_price))
-
-            # Medium
-            dec_inp_medium = self._prepare_decoder_input(x, pred_len=20)
-            y_mark_medium = self._prepare_decoder_mark(x_mark, pred_len=20)
-            medium_pred = self.medium_informer(x, x_mark, dec_inp_medium, y_mark_medium)
-            all_signals.append(self.signal_extractor(medium_pred, current_price))
-
-            # Long
+            # 한 번만 forward pass 실행
+            # 최대 길이(60)로 예측 수행
             dec_inp_long = self._prepare_decoder_input(x, pred_len=60)
             y_mark_long = self._prepare_decoder_mark(x_mark, pred_len=60)
-            long_pred = self.long_informer(x, x_mark, dec_inp_long, y_mark_long)
+            
+            # 하나의 공유 모델로 60일 예측
+            full_prediction = self.shared_informer(x, x_mark, dec_inp_long, y_mark_long)
+            # shape: [batch_size, 60, features]
+
+            # 각 길이별로 슬라이싱하여 신호 추출
+            # Short (5일)
+            short_pred = full_prediction[:, :5, :]  # 첫 5일만 사용
+            all_signals.append(self.signal_extractor(short_pred, current_price))
+
+            # Medium (20일)  
+            medium_pred = full_prediction[:, :20, :]  # 첫 20일만 사용
+            all_signals.append(self.signal_extractor(medium_pred, current_price))
+
+            # Long (60일)
+            long_pred = full_prediction[:, :60, :]  # 전체 60일 사용
             all_signals.append(self.signal_extractor(long_pred, current_price))
 
         except Exception as e:
